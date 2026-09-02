@@ -1,17 +1,21 @@
 <script setup>
-import { provide, ref } from "vue"
+import { onMounted, provide } from "vue"
+import { session } from "./session.js"
+import socketManager from "./socketManager.js"
 
-// #region reactive state
-const userName = ref("")
-// #endregion
+provide("session", session)
 
-// #region global variable
-provide("userName", userName)
-// #endregion
+onMounted(() => {
+  if (session.value?.token) {
+    socketManager.connect(session.value.token)
+  }
+})
 </script>
 
 <template>
-  <router-view />
+  <v-app>
+    <router-view />
+  </v-app>
 </template>
 
 <style scoped>
