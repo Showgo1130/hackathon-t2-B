@@ -13,15 +13,22 @@ const messages = reactive([])
 const newMessageText = ref("")
 const selection = reactive(new Set())
 
-const submittedRequestIds = computed(
-  () => new Set(messages.filter((m) => m.msg_type === "calendar_submission").map((m) => m.request_id))
-)
+// 同じ依頼に対して候補の追加を求められることがあるため、提出済みかどうかは
+// request_id ではなく「その依頼メッセージより後に提出があるか」で判定する
+const findLastIndexOf = (list, predicate) => {
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (predicate(list[i])) return i
+  }
+  return -1
+}
 
 const pendingCalendarRequest = computed(() => {
-  const candidates = messages.filter(
-    (m) => m.msg_type === "calendar_request" && !submittedRequestIds.value.has(m.request_id)
-  )
-  return candidates[candidates.length - 1] ?? null
+  const lastRequestIndex = findLastIndexOf(messages, (m) => m.msg_type === "calendar_request")
+  if (lastRequestIndex === -1) return null
+  const submittedAfter = messages
+    .slice(lastRequestIndex + 1)
+    .some((m) => m.msg_type === "calendar_submission" && m.request_id === messages[lastRequestIndex].request_id)
+  return submittedAfter ? null : messages[lastRequestIndex]
 })
 
 const senderLabel = (msg) => {
@@ -53,10 +60,11 @@ const sendMessage = () => {
 }
 
 const cellState = (date, hour) => (selection.has(`${date}_${hour}`) ? "selected" : "unset")
-const toggleCell = ({ date, hour }) => {
-  const key = `${date}_${hour}`
-  if (selection.has(key)) selection.delete(key)
-  else selection.add(key)
+// 単セルは選択の反転、範囲選択はまとめて選択（全て選択済みならまとめて解除）
+const onCellsSelect = ({ cells }) => {
+  const keys = cells.map(({ date, hour }) => `${date}_${hour}`)
+  const shouldDeselect = keys.every((key) => selection.has(key))
+  keys.forEach((key) => (shouldDeselect ? selection.delete(key) : selection.add(key)))
 }
 const submitCalendar = (requestId) => {
   const slots = [...selection].map((key) => {
@@ -97,7 +105,7 @@ const logout = () => {
         :range-start="pendingCalendarRequest.payload.rangeStart"
         :range-end="pendingCalendarRequest.payload.rangeEnd"
         :cell-state="cellState"
-        @cell-click="toggleCell"
+        @cells-select="onCellsSelect"
       />
       <v-btn class="mt-3" color="primary" @click="submitCalendar(pendingCalendarRequest.payload.requestId)">
         この内容で送信する
