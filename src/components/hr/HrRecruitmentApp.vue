@@ -11,6 +11,7 @@ const session = inject("session")
 const mobileMenuOpen = ref(false)
 
 const navItems = [
+  { label: "ダッシュボード", icon: "dashboard", route: "hr-dashboard" },
   { label: "チャット", icon: "chat", route: "hr-chat" },
   { label: "日程調整を作成", icon: "calendar", route: "hr-schedule-create" },
   { label: "送信済み", icon: "calendar", route: "hr-sent" },

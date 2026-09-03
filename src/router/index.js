@@ -3,6 +3,7 @@ import Login from "../components/Login.vue"
 import StudentChat from "../components/student/StudentChat.vue"
 import HrRecruitmentApp from "../components/hr/HrRecruitmentApp.vue"
 import HrChatPage from "../components/hr/HrChatPage.vue"
+import HrDashboardPage from "../components/hr/HrDashboardPage.vue"
 import HrChatRoomsPage from "../components/hr/HrChatRoomsPage.vue"
 import HrScheduleCreatePage from "../components/hr/HrScheduleCreatePage.vue"
 import HrSectionPlaceholder from "../components/hr/HrSectionPlaceholder.vue"
@@ -40,7 +41,12 @@ const router = createRouter({
         {
           path: "",
           name: "hr",
-          redirect: { name: "hr-chat" },
+          redirect: { name: "hr-dashboard" },
+        },
+        {
+          path: "dashboard",
+          name: "hr-dashboard",
+          component: HrDashboardPage,
         },
         {
           path: "chat",
