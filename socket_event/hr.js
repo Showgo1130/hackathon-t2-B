@@ -42,14 +42,36 @@ export default async (io, socket) => {
     return conversations
   }
 
+  // 提出期限と「候補が合わずに再依頼した回数」は calendar_request メッセージにしか無い。
+  // ダッシュボードが要対応を判定できるよう、依頼IDごとにまとめ直して渡す
+  const buildRequestMeta = (calendarRequests) => {
+    const meta = {}
+    for (const message of calendarRequests) {
+      if (!message.request_id) continue
+      const entry = meta[message.request_id] ?? { calendarCount: 0, responseDeadline: null, lastSentAt: null }
+      entry.calendarCount += 1
+      entry.lastSentAt = message.created_at
+      // 再依頼のカレンダーには期限が入らないので、最初に設定された期限を残す
+      if (message.payload?.responseDeadline) entry.responseDeadline = message.payload.responseDeadline
+      meta[message.request_id] = entry
+    }
+    return meta
+  }
+
   const sendDashboard = async () => {
-    const [students, interviewers, requests, conversations] = await Promise.all([
+    const [students, interviewers, requests, conversations, calendarRequests, studentMessages] = await Promise.all([
       studentsRepo.list(),
       interviewersRepo.list(),
-      interviewRequestsRepo.listForHr(hrId),
+      interviewRequestsRepo.listAll(),
       joinAllConversations(),
+      messagesRepo.listCalendarRequests(),
+      messagesRepo.listLatestStudentMessages(),
     ])
-    socket.emit("dashboardData", { students, interviewers, requests, conversations })
+    socket.emit("dashboardData", {
+      students, interviewers, requests, conversations,
+      requestMeta: buildRequestMeta(calendarRequests),
+      studentMessages,
+    })
   }
 
   await sendDashboard()
@@ -166,27 +188,41 @@ export default async (io, socket) => {
   })
 
   // ①ループバック：条件が合わなかった依頼を新しい期間で再送する
-  socket.on("resendRequest", async ({ requestId, interviewerIds, rangeStart, rangeEnd }) => {
+  socket.on("resendRequest", async ({ requestId, interviewerIds, rangeStart, rangeEnd, responseDeadline, message: note }, acknowledge) => {
     const existing = await interviewRequestsRepo.findById(requestId)
-    if (!existing) return
+    if (!existing) { acknowledge?.({ ok: false, error: "not_found" }); return }
+    const targetInterviewerIds = Array.isArray(interviewerIds) && interviewerIds.length
+      ? interviewerIds
+      : existing.interviewer_ids
 
-    const request = await interviewRequestsRepo.resend(requestId, { rangeStart, rangeEnd, interviewerIds })
+    const request = await interviewRequestsRepo.resend(requestId, { rangeStart, rangeEnd, interviewerIds: targetInterviewerIds })
     const studentConversation = await conversationsRepo.findOrCreateForStudent(request.student_id, hrId)
-    for (const interviewerId of interviewerIds) {
+    for (const interviewerId of targetInterviewerIds) {
       const interviewerConversation = await conversationsRepo.findOrCreateForInterviewer(interviewerId, hrId)
       socket.join(roomOf(interviewerConversation.id))
     }
 
-    const message = await messagesRepo.create({
+    // 期限を入れ直さないと、ダッシュボードが古い期限のまま「期限切れ」を出し続ける
+    const deadlineDate = new Date(responseDeadline)
+    const hasDeadline = !Number.isNaN(deadlineDate.getTime())
+    const calendarMessage = await messagesRepo.create({
       conversationId: studentConversation.id,
       senderKind: "system",
       senderId: null,
-      body: `面接可能な日時を ${rangeStart} 〜 ${rangeEnd} の期間で選び直してください`,
+      body: note?.trim() || `面接可能な日時を ${rangeStart} 〜 ${rangeEnd} の期間で選び直してください`,
       msgType: "calendar_request",
-      payload: { requestId: request.id, rangeStart, rangeEnd },
+      payload: {
+        requestId: request.id, rangeStart, rangeEnd,
+        responseDeadline: hasDeadline ? deadlineDate.toISOString() : null,
+        reminderAt: hasDeadline ? new Date(deadlineDate.getTime() - 86_400_000).toISOString() : null,
+        reminderSent: false,
+      },
       requestId: request.id,
     })
-    io.to(roomOf(studentConversation.id)).emit("newMessage", message)
+    io.to(roomOf(studentConversation.id)).emit("newMessage", calendarMessage)
+    if (hasDeadline) scheduleReminder(io, calendarMessage)
     socket.emit("requestCreated", request)
+    acknowledge?.({ ok: true })
+    await sendDashboard()
   })
 }

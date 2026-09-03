@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router"
 import { session } from "../../session.js"
 import socketManager from "../../socketManager.js"
 import HrIcon from "./ui/HrIcon.vue"
+import { markRead } from "./readState.js"
 import ChatCalendarCard from "../student/ChatCalendarCard.vue"
 
 const route = useRoute()
@@ -13,7 +14,7 @@ const socket = getSocket()
 const party = ref(null)
 const conversation = ref(null)
 const messages = ref([])
-const input = ref("")
+const input = ref(typeof route.query.draft === "string" ? route.query.draft : "")
 const loading = ref(true)
 const chatBody = ref(null)
 const role = computed(() => route.params.role)
@@ -28,14 +29,18 @@ const onDashboard = (data) => {
 }
 const onReady = ({ conversation: readyConversation, messages: history }) => {
   conversation.value = readyConversation; messages.value = history ?? []; loading.value = false; scrollBottom()
+  markRead(route.params.id)
 }
 const onNewMessage = (message) => {
   if (message.conversation_id !== conversation.value?.id || messages.value.some((item) => item.id === message.id)) return
   messages.value.push(message); scrollBottom()
+  // 開いている画面に届いたものは読んだ扱いにする（閉じた直後に未読へ戻らないように）
+  markRead(route.params.id, message.created_at)
 }
 onMounted(() => {
   socket.on("dashboardData", onDashboard); socket.on("conversationReady", onReady); socket.on("newMessage", onNewMessage)
   socket.emit("loadDashboard"); socket.emit("openPartyConversation", { kind: role.value, partyId: route.params.id })
+  markRead(route.params.id)
 })
 onUnmounted(() => {
   socket.off("dashboardData", onDashboard); socket.off("conversationReady", onReady); socket.off("newMessage", onNewMessage)

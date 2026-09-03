@@ -44,6 +44,25 @@ export const messagesRepo = {
     return data
   },
 
+  // 学生から届いた最新メッセージを会話ごとに1件返す（ダッシュボードの未読判定用）。
+  // 未読の判定にしか使わないので、全件ではなく直近分だけを見る
+  async listLatestStudentMessages(limit = 500) {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id, conversation_id, body, msg_type, created_at")
+      .eq("sender_kind", "student")
+      // 候補日時の提出は自動で照合まで進むので、人が読む必要のある本文だけを対象にする
+      .eq("msg_type", "text")
+      .order("created_at", { ascending: false })
+      .limit(limit)
+    if (error) throw error
+    const latest = new Map()
+    for (const message of data) {
+      if (!latest.has(message.conversation_id)) latest.set(message.conversation_id, message)
+    }
+    return [...latest.values()]
+  },
+
   async updatePayload(id, payload) {
     const { data, error } = await supabase.from("messages").update({ payload }).eq("id", id).select().single()
     if (error) throw error

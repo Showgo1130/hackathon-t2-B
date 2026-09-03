@@ -5,12 +5,17 @@ import socketManager from "../../socketManager.js"
 import { session } from "../../session.js"
 import HrCreateUserDialog from "./HrCreateUserDialog.vue"
 import HrIcon from "./ui/HrIcon.vue"
+import { lastReadAt, readAtMap } from "./readState.js"
 
 const router = useRouter()
 const socket = socketManager.getInstance()
 
 const students = reactive([])
 const requests = reactive([])
+// 提出期限と再依頼回数は依頼IDごと、学生の最新メッセージは会話IDごとにサーバーから届く
+const requestMeta = reactive({})
+const conversations = reactive([])
+const studentMessages = reactive([])
 
 const requestsByStudent = (studentId) =>
   requests.filter((r) => r.student_id === studentId).sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
@@ -114,7 +119,22 @@ const scheduleStatusSummary = computed(() =>
     count: students.filter((s) => scheduleStatusKey(s.id) === key).length,
   }))
 )
-const unsentStudents = computed(() => students.filter((s) => scheduleStatusKey(s.id) === "none"))
+// 「まだ依頼が無い人」だけを未送信にすると、1次が確定して2次に進んだ候補者が
+// いつまでも「確定済み」のまま抜け落ちる。選考ステップに必要な回数と、
+// 確定済みの面接数を突き合わせて「次の依頼が必要か」で判定する
+const REQUIRED_ROUNDS = { first_interview: 1, second_interview: 2, final_interview: 3 }
+const confirmedCount = (studentId) => requestsByStudent(studentId).filter((r) => r.status === "confirmed").length
+const activeRequest = (studentId) =>
+  requestsByStudent(studentId).find((r) => r.status === "awaiting_student" || r.status === "matching") ?? null
+const roundLabel = (round) => (round >= 3 ? "最終面接" : `${round}次面接`)
+const nextRoundLabel = (studentId) => roundLabel(confirmedCount(studentId) + 1)
+const needsNewRequest = (student) => {
+  const required = REQUIRED_ROUNDS[student.selection_status]
+  if (!required) return false // 内定・不採用は日程調整の対象外
+  if (activeRequest(student.id)) return false
+  return confirmedCount(student.id) < required
+}
+const unsentStudents = computed(() => students.filter((student) => needsNewRequest(student)))
 const unsentSearch = ref("")
 const unsentSelectionFilter = ref("all")
 const unsentPage = ref(1)
@@ -136,6 +156,164 @@ const lastUpdatedAt = (studentId) => {
 }
 const lastUpdated = (studentId) => relativeTime(lastUpdatedAt(studentId))
 
+// ---- 今日やること（要対応キュー）----
+// 集計だけでは「次に何をするか」が分からないので、候補者ごとに1件だけ
+// 実行できる作業を決めて、緊急度の高い順に並べる
+const now = ref(Date.now())
+let clockTimer = null
+onMounted(() => { clockTimer = window.setInterval(() => { now.value = Date.now() }, 60_000) })
+onUnmounted(() => window.clearInterval(clockTimer))
+
+const DAY_MS = 86_400_000
+const STALLED_DAYS = 2 // 面接官の回答が何日止まったら要対応にするか
+
+const TASK_TYPES = [
+  { key: "overdue", icon: "⏰", tone: "danger", label: "提出期限が過ぎています", action: "催促する" },
+  { key: "reply", icon: "💬", tone: "info", label: "候補者から返信があります", action: "返信する" },
+  { key: "dueToday", icon: "📅", tone: "warn", label: "本日が提出期限です", action: "催促する" },
+  { key: "resubmit", icon: "🔁", tone: "warn", label: "候補が合わず、再提出を依頼中です", action: "期間を変えて再送" },
+  { key: "stalled", icon: "🔄", tone: "warn", label: "面接官の回答が止まっています", action: "期間を変えて再送" },
+  { key: "unsent", icon: "📨", tone: "muted", label: "日程調整がまだ送られていません", action: "日程調整を送る" },
+]
+
+const studentIdByConversation = computed(() =>
+  new Map(conversations.filter((c) => c.student_id).map((c) => [c.id, c.student_id])))
+const latestMessageByStudent = computed(() => {
+  const map = new Map()
+  for (const message of studentMessages) {
+    const studentId = studentIdByConversation.value.get(message.conversation_id)
+    if (studentId) map.set(studentId, message)
+  }
+  return map
+})
+// readAtMap を参照して、チャットを開いたら未読が消えるようにする
+const unreadMessage = (studentId) => {
+  void readAtMap.value
+  const message = latestMessageByStudent.value.get(studentId)
+  if (!message) return null
+  return new Date(message.created_at).getTime() > lastReadAt(studentId) ? message : null
+}
+
+const formatDateTime = (value) =>
+  new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    .format(new Date(value))
+const isSameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString()
+const elapsedLabel = (ms) => {
+  const hours = Math.floor(ms / 3_600_000)
+  if (hours < 1) return "1時間未満"
+  if (hours < 24) return `${hours}時間`
+  return `${Math.floor(hours / 24)}日`
+}
+
+const buildTask = (student) => {
+  const request = activeRequest(student.id)
+  const meta = request ? requestMeta[request.id] : null
+  const deadline = meta?.responseDeadline ? new Date(meta.responseDeadline).getTime() : null
+  const unread = unreadMessage(student.id)
+  const base = { student, request, unread: Boolean(unread), roundLabel: nextRoundLabel(student.id) }
+
+  if (request?.status === "awaiting_student" && deadline && deadline < now.value) {
+    return { ...base, key: "overdue", detail: `提出期限 ${formatDateTime(deadline)} を ${elapsedLabel(now.value - deadline)} 過ぎています`, sortAt: deadline }
+  }
+  if (unread) {
+    return { ...base, key: "reply", detail: `${formatDateTime(unread.created_at)}「${(unread.body ?? "候補日時が届いています").slice(0, 40)}」`, sortAt: new Date(unread.created_at).getTime() }
+  }
+  if (request?.status === "awaiting_student" && deadline && isSameDay(deadline, now.value)) {
+    return { ...base, key: "dueToday", detail: `提出期限は本日 ${formatDateTime(deadline)} です`, sortAt: deadline }
+  }
+  if (request?.status === "awaiting_student" && (meta?.calendarCount ?? 0) >= 2) {
+    return { ...base, key: "resubmit", detail: `${meta.calendarCount - 1}回目の再提出依頼を ${formatDateTime(meta.lastSentAt)} に送信済みです`, sortAt: new Date(meta.lastSentAt).getTime() }
+  }
+  if (request?.status === "matching") {
+    const stoppedFor = now.value - new Date(request.updated_at).getTime()
+    if (stoppedFor >= STALLED_DAYS * DAY_MS) {
+      return { ...base, key: "stalled", detail: `${elapsedLabel(stoppedFor)} 動きがありません（面接官の可否・承認待ち）`, sortAt: new Date(request.updated_at).getTime() }
+    }
+  }
+  if (needsNewRequest(student)) {
+    return { ...base, key: "unsent", detail: `選考ステップは「${SELECTION_STATUS_LABEL[student.selection_status]}」。${nextRoundLabel(student.id)}の日程調整が必要です`, sortAt: new Date(student.created_at ?? 0).getTime() }
+  }
+  return null
+}
+
+const tasks = computed(() => {
+  const order = TASK_TYPES.map((t) => t.key)
+  return students
+    .map(buildTask)
+    .filter(Boolean)
+    .map((task) => ({ ...task, ...TASK_TYPES[order.indexOf(task.key)], priority: order.indexOf(task.key) }))
+    .sort((a, b) => (a.priority - b.priority) || (a.sortAt - b.sortAt))
+})
+const taskCount = (key) => tasks.value.filter((task) => task.key === key).length
+const taskFilter = ref("all")
+const filteredTasks = computed(() =>
+  taskFilter.value === "all" ? tasks.value : tasks.value.filter((task) => task.key === taskFilter.value))
+const TASK_PREVIEW = 6
+const showAllTasks = ref(false)
+const visibleTasks = computed(() =>
+  showAllTasks.value ? filteredTasks.value : filteredTasks.value.slice(0, TASK_PREVIEW))
+watch(taskFilter, () => { showAllTasks.value = false })
+
+// 催促は文面を用意した状態でチャットを開く。人事が毎回書き起こさなくていいようにする
+const nudgeDraft = (student) =>
+  `${student.name} さん\nお送りしている面接候補日時について、ご回答をお待ちしております。ご都合が合わない場合もお知らせください。`
+
+const runTask = (task) => {
+  if (task.key === "unsent") {
+    router.push({ name: "hr-schedule-create", query: { students: task.student.id } })
+    return
+  }
+  if (task.key === "resubmit" || task.key === "stalled") {
+    openResend(task)
+    return
+  }
+  const query = task.key === "reply" ? {} : { draft: nudgeDraft(task.student) }
+  router.push({ name: "hr-chat-room", params: { role: "student", id: task.student.id }, query })
+}
+
+// ---- 期間を変えて再送 ----
+const resendOpen = ref(false)
+const resendTarget = ref(null)
+const resendSending = ref(false)
+const resendError = ref("")
+const toIsoDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+const resendForm = reactive({ rangeStart: "", rangeEnd: "", deadlineDate: "", deadlineTime: "23:59" })
+
+const openResend = (task) => {
+  const start = new Date()
+  const end = new Date(start.getTime() + 13 * DAY_MS)
+  const deadline = new Date(start.getTime() + 2 * DAY_MS)
+  resendTarget.value = task
+  resendForm.rangeStart = toIsoDate(start)
+  resendForm.rangeEnd = toIsoDate(end)
+  resendForm.deadlineDate = toIsoDate(deadline)
+  resendForm.deadlineTime = "23:59"
+  resendError.value = ""
+  resendOpen.value = true
+}
+const resendValid = computed(() =>
+  resendForm.rangeStart && resendForm.rangeEnd && resendForm.rangeStart <= resendForm.rangeEnd
+  && resendForm.deadlineDate && resendForm.deadlineTime && !resendSending.value)
+
+const submitResend = () => {
+  if (!resendValid.value || !resendTarget.value?.request) return
+  resendSending.value = true
+  resendError.value = ""
+  socket.emit("resendRequest", {
+    requestId: resendTarget.value.request.id,
+    interviewerIds: resendTarget.value.request.interviewer_ids,
+    rangeStart: resendForm.rangeStart,
+    rangeEnd: resendForm.rangeEnd,
+    responseDeadline: new Date(`${resendForm.deadlineDate}T${resendForm.deadlineTime}:00`).toISOString(),
+  }, (result) => {
+    resendSending.value = false
+    if (!result?.ok) { resendError.value = "再送できませんでした。通信状況を確認してください。"; return }
+    resendOpen.value = false
+    toast.value = `${resendTarget.value.student.name}さんへ新しい期間で再送しました`
+    window.setTimeout(() => { toast.value = "" }, 2800)
+  })
+}
+
 // ---- 一覧のソート ----
 const SELECTION_STATUS_ORDER = SELECTION_STATUS_OPTIONS.map((o) => o.value)
 const SCHEDULE_STATUS_ORDER = Object.keys(SCHEDULE_STATUS_META)
@@ -153,8 +331,13 @@ const toggleSort = (key) => {
 }
 const sortIndicator = (key) => (sortKey.value !== key ? "" : sortDir.value === "asc" ? "▲" : "▼")
 
+const taskByStudent = computed(() => new Map(tasks.value.map((task) => [task.student.id, task])))
+const taskOf = (studentId) => taskByStudent.value.get(studentId) ?? null
+const urgencyOf = (studentId) => taskOf(studentId)?.priority ?? TASK_TYPES.length
+
 const sortedStudents = computed(() => {
-  if (!sortKey.value) return students
+  // 並び替えを指定していないときは、要対応の緊急度順にする
+  if (!sortKey.value) return [...students].sort((a, b) => urgencyOf(a.id) - urgencyOf(b.id))
   const dir = sortDir.value === "asc" ? 1 : -1
   return [...students].sort((a, b) => {
     let av, bv
@@ -217,6 +400,10 @@ const goToChat = (student) =>
 const onDashboardData = (data) => {
   students.splice(0, students.length, ...data.students)
   requests.splice(0, requests.length, ...data.requests)
+  conversations.splice(0, conversations.length, ...(data.conversations ?? []))
+  studentMessages.splice(0, studentMessages.length, ...(data.studentMessages ?? []))
+  Object.keys(requestMeta).forEach((key) => delete requestMeta[key])
+  Object.assign(requestMeta, data.requestMeta ?? {})
 }
 const onNewMessage = () => socket.emit("loadDashboard")
 
@@ -294,29 +481,103 @@ const createUser = async (user) => {
       </button>
     </header>
 
+    <v-card class="pa-4 mb-4 task-card">
+      <div class="task-head">
+        <div>
+          <div class="text-subtitle-1 font-weight-medium">今日やること</div>
+          <small class="text-caption text-medium-emphasis">
+            上から順に片付ければ、提出期限切れと候補者からの返信を取りこぼしません。
+          </small>
+        </div>
+        <strong class="task-total" :class="{ 'task-total--zero': tasks.length === 0 }">
+          {{ tasks.length }}<span>件</span>
+        </strong>
+      </div>
+
+      <div class="task-chips">
+        <button type="button" :class="{ active: taskFilter === 'all' }" @click="taskFilter = 'all'">
+          すべて<i>{{ tasks.length }}</i>
+        </button>
+        <template v-for="type in TASK_TYPES" :key="type.key">
+          <button
+            v-if="taskCount(type.key) > 0"
+            type="button"
+            :class="[`chip--${type.tone}`, { active: taskFilter === type.key }]"
+            @click="taskFilter = type.key"
+          >{{ type.icon }} {{ type.label }}<i>{{ taskCount(type.key) }}</i></button>
+        </template>
+      </div>
+
+      <p v-if="!tasks.length" class="task-empty">✅ 対応が必要な候補者はいません。</p>
+      <p v-else-if="!filteredTasks.length" class="task-empty">この条件に一致する作業はありません。</p>
+      <ul v-else class="task-list">
+        <li v-for="task in visibleTasks" :key="task.student.id" :class="`task task--${task.tone}`">
+          <span class="task__icon">{{ task.icon }}</span>
+          <div class="task__body">
+            <div class="task__title">
+              <strong>{{ task.student.name }}</strong>
+              <span class="task__round">{{ task.roundLabel }}</span>
+              <span v-if="task.unread" class="task__unread">未読</span>
+            </div>
+            <div class="task__label">{{ task.label }}</div>
+            <div class="task__detail">{{ task.detail }}</div>
+          </div>
+          <div class="task__actions">
+            <button type="button" class="task__primary" @click="runTask(task)">{{ task.action }}</button>
+            <button
+              type="button"
+              class="task__secondary"
+              :title="`${task.student.name} さんとのチャットを開く`"
+              @click="goToChat(task.student)"
+            >💬</button>
+          </div>
+        </li>
+      </ul>
+      <button
+        v-if="filteredTasks.length > TASK_PREVIEW"
+        type="button"
+        class="task-more"
+        @click="showAllTasks = !showAllTasks"
+      >{{ showAllTasks ? "折りたたむ" : `残り ${filteredTasks.length - TASK_PREVIEW} 件を表示` }}</button>
+    </v-card>
+
     <div class="dashboard-body">
       <v-card class="pa-4 flex-grow-1" style="min-width: 0">
         <div class="text-subtitle-2 font-weight-medium mb-3 text-medium-emphasis">選考ステップ別 人数</div>
         <div class="summary-grid mb-6">
-          <div v-for="opt in selectionStepSummary" :key="opt.value" class="summary-card">
+          <button
+            v-for="opt in selectionStepSummary"
+            :key="opt.value"
+            type="button"
+            class="summary-card"
+            :class="{ 'summary-card--active': selectionFilter === opt.value }"
+            @click="selectionFilter = selectionFilter === opt.value ? 'all' : opt.value"
+          >
             <div class="d-flex align-center ga-2">
               <div class="summary-icon" :style="{ background: opt.bg, color: opt.color }">{{ opt.icon }}</div>
               <div class="summary-count">{{ opt.count }}<span class="text-caption font-weight-regular">件</span></div>
             </div>
             <div class="font-weight-medium mt-2">{{ opt.title }}</div>
-          </div>
+          </button>
         </div>
 
         <div class="text-subtitle-2 font-weight-medium mb-3 text-medium-emphasis">日程調整状況別 人数</div>
         <div class="summary-grid mb-6">
-          <div v-for="item in scheduleStatusSummary" :key="item.key" class="summary-card">
+          <button
+            v-for="item in scheduleStatusSummary"
+            :key="item.key"
+            type="button"
+            class="summary-card"
+            :class="{ 'summary-card--active': scheduleFilter === item.key }"
+            @click="scheduleFilter = scheduleFilter === item.key ? 'all' : item.key"
+          >
             <div class="d-flex align-center ga-2">
               <div class="summary-icon" :style="{ background: item.bg, color: item.color }">{{ item.icon }}</div>
               <div class="summary-count">{{ item.count }}<span class="text-caption font-weight-regular">件</span></div>
             </div>
             <div class="font-weight-medium mt-2">{{ item.label }}</div>
             <div class="text-caption text-medium-emphasis">{{ item.desc }}</div>
-          </div>
+          </button>
         </div>
 
         <div class="student-list-title"><div><div class="text-subtitle-1 font-weight-medium">学生ステータス一覧</div><small>{{ filteredStudents.length }}件中 {{ paginatedStudents.length }}件を表示</small></div><div class="student-filters"><label><HrIcon name="search" :size="15" /><input v-model="dashboardSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="selectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select><select v-model="scheduleFilter"><option value="all">すべての日程状況</option><option v-for="(meta, key) in SCHEDULE_STATUS_META" :key="key" :value="key">{{ meta.label }}</option></select></div></div>
@@ -341,14 +602,24 @@ const createUser = async (user) => {
             <div class="dash-cell">
               <div class="d-flex align-center ga-3">
                 <div class="avatar-circle" :style="{ background: avatarColor(s.name) }">{{ initials(s.name) }}</div>
-                <div>
-                  <div class="font-weight-medium">{{ s.name }}</div>
+                <div style="min-width: 0">
+                  <div class="font-weight-medium d-flex align-center ga-2">
+                    {{ s.name }}
+                    <span v-if="taskOf(s.id)" :class="`row-flag row-flag--${taskOf(s.id).tone}`">
+                      {{ taskOf(s.id).icon }} {{ taskOf(s.id).label }}
+                    </span>
+                  </div>
                   <div class="text-caption text-medium-emphasis">{{ s.email }}</div>
                 </div>
               </div>
             </div>
 
-            <div class="dash-cell">{{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}</div>
+            <div class="dash-cell dash-cell--column">
+              <span>{{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}</span>
+              <span class="text-caption text-medium-emphasis">
+                {{ needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件` }}
+              </span>
+            </div>
 
             <div class="dash-cell dash-cell--column">
               <span class="status-chip" :style="{ color: scheduleMeta(s.id).color, background: scheduleMeta(s.id).bg }">
@@ -383,10 +654,19 @@ const createUser = async (user) => {
       </v-card>
 
       <v-card class="pa-4 unsent-panel">
-        <div class="text-subtitle-2 font-weight-medium mb-3">
-          未送信の学生
+        <div class="text-subtitle-2 font-weight-medium mb-1">
+          日程調整が必要な候補者
           <span class="text-caption text-medium-emphasis">（{{ unsentStudents.length }}件）</span>
         </div>
+        <p class="text-caption text-medium-emphasis mb-3">
+          まだ依頼していない人と、次の面接の依頼がまだの人を表示します。
+        </p>
+        <button
+          v-if="unsentStudents.length"
+          type="button"
+          class="bulk-send"
+          @click="router.push({ name: 'hr-schedule-create', query: { students: filteredUnsentStudents.map((s) => s.id).join(',') } })"
+        >表示中の {{ filteredUnsentStudents.length }}名にまとめて送る</button>
         <div class="unsent-filters"><label><HrIcon name="search" :size="14" /><input v-model="unsentSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="unsentSelectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select></div>
         <div v-if="unsentStudents.length === 0" class="text-caption text-medium-emphasis">
           未送信の学生はいません
@@ -401,9 +681,14 @@ const createUser = async (user) => {
               <div class="flex-grow-1" style="min-width: 0">
                 <div class="font-weight-medium text-body-2 text-truncate">{{ s.name }}</div>
                 <div class="text-caption text-medium-emphasis">
-                  {{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}
+                  {{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}・次は{{ nextRoundLabel(s.id) }}
                 </div>
               </div>
+              <button
+                type="button"
+                class="unsent-send"
+                @click="router.push({ name: 'hr-schedule-create', query: { students: s.id } })"
+              >送る</button>
               <v-btn
                 size="x-small"
                 variant="text"
@@ -448,6 +733,37 @@ const createUser = async (user) => {
         <div class="d-flex justify-end ga-2">
           <v-btn variant="text" @click="cancelConfirm">キャンセル</v-btn>
           <v-btn color="primary" @click="confirmSave">保存する</v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="resendOpen" max-width="430">
+      <v-card class="pa-5">
+        <div class="text-h6 mb-1">期間を変えて再送</div>
+        <p class="text-body-2 text-medium-emphasis mb-4">
+          {{ resendTarget?.student.name }} さんに、新しい候補期間で回答を依頼し直します。
+          面接官はこれまでと同じ {{ resendTarget?.request?.interviewer_ids?.length ?? 0 }}名です。
+        </p>
+        <label class="resend-field">
+          <span>候補日時の期間</span>
+          <div class="resend-range">
+            <input v-model="resendForm.rangeStart" type="date" />
+            <em>〜</em>
+            <input v-model="resendForm.rangeEnd" type="date" />
+          </div>
+        </label>
+        <label class="resend-field">
+          <span>提出期限</span>
+          <div class="resend-range resend-range--deadline">
+            <input v-model="resendForm.deadlineDate" type="date" />
+            <input v-model="resendForm.deadlineTime" type="time" />
+          </div>
+        </label>
+        <p class="text-caption text-medium-emphasis mt-2 mb-0">期限の24時間前にリマインドが自動送信されます。</p>
+        <p v-if="resendError" class="resend-error">{{ resendError }}</p>
+        <div class="d-flex justify-end ga-2 mt-4">
+          <v-btn variant="text" @click="resendOpen = false">キャンセル</v-btn>
+          <v-btn color="primary" :disabled="!resendValid" :loading="resendSending" @click="submitResend">再送する</v-btn>
         </div>
       </v-card>
     </v-dialog>
@@ -506,7 +822,14 @@ const createUser = async (user) => {
   grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
 }
 .summary-grid.mb-6 { margin-bottom: 16px !important; }
-.summary-card { min-height: 78px; border: 1px solid #e4e9f1; border-radius: 9px; padding: 9px 10px; }
+/* 集計カードは押すと一覧を絞り込むボタンにした */
+.summary-card {
+  display: block; min-height: 78px; border: 1px solid #e4e9f1; border-radius: 9px; padding: 9px 10px;
+  background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.summary-card:hover { border-color: #b7c9e9; }
+.summary-card--active { border-color: #1769ff; box-shadow: 0 0 0 2px rgb(23 105 255 / 12%); }
 .summary-icon { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 7px; font-size: 12px; }
 .summary-count { font-size: 18px; font-weight: 700; line-height: 1; }
 .summary-card > .font-weight-medium { margin-top: 6px !important; font-size: 12px; line-height: 1.25; }
@@ -552,6 +875,88 @@ const createUser = async (user) => {
 }
 .avatar-circle--sm { width: 26px; height: 26px; font-size: 11px; }
 .unsent-filters { display: grid; gap: 6px; margin-bottom: 12px; }.unsent-filters label { display: flex; height: 31px; align-items: center; gap: 6px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 8px; color: #8490a3; }.unsent-filters input { min-width: 0; flex: 1; border: 0; outline: 0; font: inherit; font-size: 9px; }.unsent-filters select { height: 31px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 7px; background: #fff; color: #536077; font-size: 9px; }.unsent-item { min-height: 42px!important; }.pagination--unsent { justify-content: center; padding-top: 9px; }.pagination--unsent button { width: 30px; padding: 0; }
+
+/* 今日やること（要対応キュー） */
+.task-card { border: 1px solid #e2e8f2; }
+.task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.task-total { color: #1769ff; font-size: 30px; line-height: 1; }
+.task-total span { margin-left: 3px; color: #7b879b; font-size: 12px; }
+.task-total--zero { color: #1a8a4c; }
+.task-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
+.task-chips button {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid #dce3ed; border-radius: 999px; padding: 6px 12px;
+  background: #fff; color: #4c5a72; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.task-chips button i { border-radius: 999px; background: #eef1f6; padding: 1px 7px; font-size: 11px; font-style: normal; font-weight: 700; }
+.task-chips button:hover { border-color: #b7c9e9; }
+.task-chips button.active { border-color: #1769ff; background: #f2f7ff; color: #1769ff; }
+.task-chips button.active i { background: #dfeaff; color: #1769ff; }
+.task-chips .chip--danger.active { border-color: #c9352a; background: #fdeceb; color: #c9352a; }
+.task-chips .chip--danger.active i { background: #fbdcda; color: #c9352a; }
+.task-chips .chip--warn.active { border-color: #c2740a; background: #fdf4e7; color: #a86408; }
+.task-chips .chip--warn.active i { background: #f8e6c8; color: #a86408; }
+
+.task-list { margin: 0; padding: 0; list-style: none; }
+.task {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid #e5eaf2; border-left: 4px solid #cbd5e3; border-radius: 10px;
+  margin-bottom: 8px; padding: 11px 13px; background: #fff;
+}
+.task--danger { border-left-color: #c9352a; background: #fffafa; }
+.task--warn { border-left-color: #e0930f; background: #fffdf7; }
+.task--info { border-left-color: #1769ff; background: #f9fbff; }
+.task--muted { border-left-color: #94a2b8; }
+.task__icon { font-size: 19px; }
+.task__body { min-width: 0; flex: 1; }
+.task__title { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.task__title strong { font-size: 14px; }
+.task__round { border-radius: 6px; background: #eef1f6; padding: 2px 7px; color: #55637c; font-size: 11px; font-weight: 700; }
+.task__unread { border-radius: 6px; background: #1769ff; padding: 2px 7px; color: #fff; font-size: 11px; font-weight: 700; }
+.task__label { margin-top: 3px; color: #2b3a52; font-size: 12px; font-weight: 700; }
+.task__detail { margin-top: 2px; color: #6b7789; font-size: 12px; }
+.task__actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
+.task__primary {
+  min-height: 34px; border: 0; border-radius: 8px; padding: 0 14px;
+  background: #1769ff; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.task__primary:hover { background: #0f57d8; }
+.task__secondary {
+  display: grid; width: 34px; height: 34px; place-items: center;
+  border: 1px solid #dce3ed; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer;
+}
+.task__secondary:hover { border-color: #1769ff; }
+.task-empty { margin: 12px 0 0; color: #6b7789; font-size: 13px; }
+.task-more {
+  width: 100%; border: 1px dashed #cfd8e6; border-radius: 8px; padding: 8px;
+  background: #fff; color: #4c5a72; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.task-more:hover { border-color: #1769ff; color: #1769ff; }
+
+.row-flag { border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 700; }
+.row-flag--danger { background: #fdeceb; color: #c9352a; }
+.row-flag--warn { background: #fdf4e7; color: #a86408; }
+.row-flag--info { background: #eaf2ff; color: #1156c9; }
+.row-flag--muted { background: #eef1f6; color: #55637c; }
+
+.bulk-send {
+  width: 100%; border: 1px solid #1769ff; border-radius: 8px; margin-bottom: 10px; padding: 8px;
+  background: #f2f7ff; color: #1769ff; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.bulk-send:hover { background: #e4eeff; }
+.unsent-send {
+  flex-shrink: 0; border: 1px solid #1769ff; border-radius: 7px; padding: 4px 10px;
+  background: #1769ff; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.unsent-send:hover { background: #0f57d8; }
+
+.resend-field { display: block; margin-top: 12px; }
+.resend-field > span { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 700; }
+.resend-range { display: grid; grid-template-columns: 1fr 16px 1fr; align-items: center; gap: 5px; }
+.resend-range--deadline { grid-template-columns: 1.4fr 1fr; }
+.resend-range input { height: 38px; border: 1px solid #dce3ed; border-radius: 8px; padding: 0 9px; font: inherit; font-size: 13px; }
+.resend-range em { text-align: center; font-style: normal; color: #7b879b; }
+.resend-error { margin: 10px 0 0; color: #c9352a; font-size: 12px; }
 
 .toast {
   position: fixed;

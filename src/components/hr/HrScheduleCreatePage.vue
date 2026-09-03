@@ -1,10 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 import { session } from "../../session.js"
 import socketManager from "../../socketManager.js"
 import HrIcon from "./ui/HrIcon.vue"
 
 const socket = (() => { try { return socketManager.getInstance() } catch { return socketManager.connect(session.value.token) } })()
+// ダッシュボードの「日程調整を送る」から来たときは、その候補者を選んだ状態で開く
+const route = useRoute()
+const presetStudentIds = String(route.query.students ?? "").split(",").filter(Boolean)
+const presetApplied = ref(false)
 const students = ref([]), interviewers = ref([]), loading = ref(true), sending = ref(false)
 const search = ref(""), selectionFilter = ref("all"), error = ref(""), success = ref("")
 const iso = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`
@@ -24,7 +29,13 @@ const valid = computed(() => form.studentIds.length && targetInterviewerIds.valu
   && form.requiredCount <= targetInterviewerIds.value.length && form.duration >= 1 && form.duration <= 60
   && form.rangeStart && form.rangeEnd && form.rangeStart <= form.rangeEnd && form.deadlineDate && form.deadlineTime && !sending.value)
 watch(targetInterviewerIds, (ids) => { if (form.requiredCount > ids.length) form.requiredCount = Math.max(1, ids.length) })
-const onDashboard = (data) => { students.value=data.students??[]; interviewers.value=data.interviewers??[]; loading.value=false }
+const onDashboard = (data) => {
+  students.value=data.students??[]; interviewers.value=data.interviewers??[]; loading.value=false
+  if (presetStudentIds.length && !presetApplied.value) {
+    presetApplied.value = true
+    form.studentIds = presetStudentIds.filter((id) => students.value.some((student) => student.id === id))
+  }
+}
 onMounted(() => { socket.on("dashboardData",onDashboard); socket.emit("loadDashboard") })
 onUnmounted(() => socket.off("dashboardData",onDashboard))
 const toggleVisible = () => {
