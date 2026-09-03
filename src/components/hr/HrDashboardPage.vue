@@ -209,8 +209,9 @@ const avatarColor = (name) => {
   return AVATAR_COLORS[code % AVATAR_COLORS.length]
 }
 
-// チャット画面は会話ごとのルートを持たないため、チャット一覧へ送る
-const goToChat = () => router.push({ name: "hr-chat" })
+// 一覧から相手を選び直させず、その学生とのチャットへ直接入る
+const goToChat = (student) =>
+  router.push({ name: "hr-chat-room", params: { role: "student", id: student.id } })
 
 // ---- サーバーからの一覧データ ----
 const onDashboardData = (data) => {
@@ -359,14 +360,20 @@ const createUser = async (user) => {
             <div class="dash-cell text-caption text-medium-emphasis">{{ lastUpdated(s.id) }}</div>
 
             <div class="dash-cell justify-end ga-1">
-              <v-btn size="small" variant="text" title="チャットを開く" @click="goToChat">💬</v-btn>
+              <v-btn
+                size="small"
+                variant="text"
+                :title="`${s.name} さんとのチャットを開く`"
+                :aria-label="`${s.name} さんとのチャットを開く`"
+                @click="goToChat(s)"
+              >💬</v-btn>
               <v-menu>
                 <template #activator="{ props }">
                   <v-btn size="small" variant="text" v-bind="props">⋮</v-btn>
                 </template>
                 <v-list density="compact">
                   <v-list-item @click="openEditDialog(s)">選考状況を編集</v-list-item>
-                  <v-list-item @click="goToChat">チャットを開く</v-list-item>
+                  <v-list-item @click="goToChat(s)">{{ s.name }} さんとのチャットを開く</v-list-item>
                 </v-list>
               </v-menu>
             </div>
@@ -397,7 +404,13 @@ const createUser = async (user) => {
                   {{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}
                 </div>
               </div>
-              <v-btn size="x-small" variant="text" title="チャットを開く" @click="goToChat">💬</v-btn>
+              <v-btn
+                size="x-small"
+                variant="text"
+                :title="`${s.name} さんとのチャットを開く`"
+                :aria-label="`${s.name} さんとのチャットを開く`"
+                @click="goToChat(s)"
+              >💬</v-btn>
             </div>
           </v-list-item>
         </v-list>
