@@ -3,6 +3,7 @@ import { computed, inject, nextTick, onMounted, onUnmounted, reactive, ref } fro
 import { useRouter } from "vue-router"
 import socketManager from "../../socketManager.js"
 import { clearSession } from "../../session.js"
+import HrIcon from "../hr/ui/HrIcon.vue"
 import ChatBubble from "../shared/ChatBubble.vue"
 import ChatCalendarCard from "./ChatCalendarCard.vue"
 import SelectionStatusChip from "./SelectionStatusChip.vue"
@@ -201,267 +202,320 @@ const onKeydown = (e) => {
 </script>
 
 <template>
-  <div class="chat-app">
-    <!-- Header -->
-    <header class="chat-header">
-      <div class="header-content">
-        <div class="header-left">
-          <span class="avatar avatar--student">{{ avatarInitial }}</span>
-          <div class="identity">
-            <h1 class="identity__name">{{ displayName }}<small>さん</small></h1>
-            <div class="identity__meta">
-              <span class="identity__meta-label">選考状況</span>
-              <SelectionStatusChip :status="selectionStatus" />
-            </div>
-          </div>
-        </div>
-        <button type="button" class="logout" @click="logout">ログアウト</button>
+  <div class="student-app">
+    <!-- 画面左：ユーザー情報（人事画面のサイドバーと同じ構成） -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand__mark"><HrIcon name="calendar" :size="25" :stroke-width="2" /></span>
+        <div><strong>Hiresch</strong><small>面接チャット</small></div>
       </div>
-    </header>
 
-    <!-- Messages Area -->
-    <div class="chat-messages">
-      <div class="messages-container">
-        <div v-if="visibleMessages.length === 0" class="empty-state">
-          まだメッセージがありません
+      <div class="identity">
+        <div class="identity__head">
+          <span class="avatar avatar--student">{{ avatarInitial }}</span>
+          <h1 class="identity__name">{{ displayName }}<small>さん</small></h1>
         </div>
+        <div class="identity__status">
+          <span class="identity__status-label">選考状況</span>
+          <SelectionStatusChip :status="selectionStatus" />
+        </div>
+      </div>
 
-        <template v-for="(msg, idx) in visibleMessages" :key="msg.id">
-          <div v-if="showDateDivider(msg, idx)" class="date-divider">
-            <span>{{ formatDateLabel(msg.created_at) }}</span>
+      <div class="account-area">
+        <button type="button" class="logout" @click="logout">
+          <HrIcon name="logout" :size="18" /><span>ログアウト</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="chat-pane">
+      <header class="chat-header">
+        <span class="chat-header__icon"><HrIcon name="chat" :size="18" /></span>
+        <div>
+          <h2>面接チャット</h2>
+          <p>人事担当者とのやり取りと日程調整をここで行います</p>
+        </div>
+      </header>
+
+      <!-- Messages Area -->
+      <div class="chat-messages">
+        <div class="messages-container">
+          <div v-if="visibleMessages.length === 0" class="empty-state">
+            まだメッセージがありません
           </div>
 
-          <!-- 日程調整カレンダー：送信後も表示したまま（読み取り専用）にする -->
-          <ChatBubble
-            v-if="msg.msg_type === 'calendar_request'"
-            :align="bubbleAlign(msg)"
-            :sender-label="senderLabel(msg)"
-            wide
-          >
-            <div class="calendar-intro">{{ msg.body }}</div>
-            <ChatCalendarCard
-              :range-start="msg.payload.rangeStart"
-              :range-end="msg.payload.rangeEnd"
-              :readonly="!isActiveCalendarRequest(msg)"
-              :submitted-slots="submittedSlotsFor(msg)"
-              @submit="(slots) => submitCalendar(msg.payload.requestId, slots)"
-            />
+          <template v-for="(msg, idx) in visibleMessages" :key="msg.id">
+            <div v-if="showDateDivider(msg, idx)" class="date-divider">
+              <span>{{ formatDateLabel(msg.created_at) }}</span>
+            </div>
 
-            <div v-if="submissionFor(msg)" class="submit-log">
-              <button type="button" class="submit-log__toggle" @click="toggleLog(msg.id)">
-                <span class="submit-log__badge">送信済み</span>
-                <span class="submit-log__text">
-                  希望日時 {{ submittedSlotsFor(msg).length }} 件を送信しました
-                </span>
-                <span class="submit-log__time">{{ formatTime(submissionFor(msg).created_at) }}</span>
-                <span class="submit-log__chevron" :class="{ 'is-open': expandedLogs.has(msg.id) }">▾</span>
-              </button>
-              <div v-if="expandedLogs.has(msg.id)" class="submit-log__body">
-                <div v-for="group in groupedSlots(msg)" :key="group.date" class="submit-log__row">
-                  <span class="submit-log__date">{{ shortDate(group.date) }}</span>
-                  <span class="submit-log__hours">
-                    <span v-for="hour in group.hours" :key="hour" class="submit-log__hour">{{ hourLabel(hour) }}</span>
+            <!-- 日程調整カレンダー：送信後も表示したまま（読み取り専用）にする -->
+            <ChatBubble
+              v-if="msg.msg_type === 'calendar_request'"
+              :align="bubbleAlign(msg)"
+              :sender-label="senderLabel(msg)"
+              wide
+            >
+              <div class="calendar-intro">{{ msg.body }}</div>
+              <ChatCalendarCard
+                :range-start="msg.payload.rangeStart"
+                :range-end="msg.payload.rangeEnd"
+                :readonly="!isActiveCalendarRequest(msg)"
+                :submitted-slots="submittedSlotsFor(msg)"
+                @submit="(slots) => submitCalendar(msg.payload.requestId, slots)"
+              />
+
+              <div v-if="submissionFor(msg)" class="submit-log">
+                <button type="button" class="submit-log__toggle" @click="toggleLog(msg.id)">
+                  <span class="submit-log__badge">送信済み</span>
+                  <span class="submit-log__text">
+                    希望日時 {{ submittedSlotsFor(msg).length }} 件を送信しました
                   </span>
+                  <span class="submit-log__time">{{ formatTime(submissionFor(msg).created_at) }}</span>
+                  <span class="submit-log__chevron" :class="{ 'is-open': expandedLogs.has(msg.id) }">▾</span>
+                </button>
+                <div v-if="expandedLogs.has(msg.id)" class="submit-log__body">
+                  <div v-for="group in groupedSlots(msg)" :key="group.date" class="submit-log__row">
+                    <span class="submit-log__date">{{ shortDate(group.date) }}</span>
+                    <span class="submit-log__hours">
+                      <span v-for="hour in group.hours" :key="hour" class="submit-log__hour">{{ hourLabel(hour) }}</span>
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
-          </ChatBubble>
+              <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
+            </ChatBubble>
 
-          <!-- 面接日程の確定通知 -->
-          <ChatBubble
-            v-else-if="isConfirmedNotice(msg)"
-            align="center"
-            :variant="bubbleVariant(msg)"
-            is-confirmed-notice
-          >
-            <div class="confirmed">
-              <div class="confirmed__head">面接日程が確定しました</div>
-              <div class="confirmed__body">
-                <div class="confirmed__year">{{ confirmedYear(msg) }}</div>
-                <div class="confirmed__value">{{ confirmedLabel(msg) }}</div>
-                <div class="confirmed__note">当日は時間に余裕をもってご参加ください。</div>
+            <!-- 面接日程の確定通知 -->
+            <ChatBubble
+              v-else-if="isConfirmedNotice(msg)"
+              align="center"
+              :variant="bubbleVariant(msg)"
+              is-confirmed-notice
+            >
+              <div class="confirmed">
+                <div class="confirmed__head">面接日程が確定しました</div>
+                <div class="confirmed__body">
+                  <div class="confirmed__year">{{ confirmedYear(msg) }}</div>
+                  <div class="confirmed__value">{{ confirmedLabel(msg) }}</div>
+                  <div class="confirmed__note">当日は時間に余裕をもってご参加ください。</div>
+                </div>
               </div>
-            </div>
-          </ChatBubble>
+            </ChatBubble>
 
-          <ChatBubble
-            v-else
-            :align="bubbleAlign(msg)"
-            :variant="bubbleVariant(msg)"
-            :sender-label="senderLabel(msg)"
-          >
-            {{ msg.body }}
-            <div v-if="msg.sender_kind !== 'system'" class="msg-time">{{ formatTime(msg.created_at) }}</div>
-          </ChatBubble>
-        </template>
-        <div ref="messagesEndRef" />
+            <ChatBubble
+              v-else
+              :align="bubbleAlign(msg)"
+              :variant="bubbleVariant(msg)"
+              :sender-label="senderLabel(msg)"
+            >
+              {{ msg.body }}
+              <div v-if="msg.sender_kind !== 'system'" class="msg-time">{{ formatTime(msg.created_at) }}</div>
+            </ChatBubble>
+          </template>
+          <div ref="messagesEndRef" />
+        </div>
       </div>
-    </div>
 
-    <!-- Input Area -->
-    <footer class="chat-input-area">
-      <div class="input-container">
-        <v-form @submit.prevent="sendMessage" class="d-flex ga-3 align-end">
-          <v-textarea
-            v-model="newMessageText"
-            placeholder="メッセージを入力... (Shift+Enterで改行)"
-            hide-details
-            variant="outlined"
-            density="compact"
-            rows="1"
-            max-rows="4"
-            auto-grow
-            bg-color="white"
-            @keydown="onKeydown"
-          />
-          <v-btn
-            type="submit"
-            color="primary"
-            height="40"
-            class="px-6 text-none font-weight-bold"
-            :disabled="!newMessageText.trim() || isSending"
-          >
-            送信
-          </v-btn>
-        </v-form>
-      </div>
-    </footer>
+      <!-- Input Area -->
+      <footer class="chat-input-area">
+        <div class="input-container">
+          <v-form @submit.prevent="sendMessage" class="d-flex ga-3 align-end">
+            <v-textarea
+              v-model="newMessageText"
+              placeholder="メッセージを入力... (Shift+Enterで改行)"
+              hide-details
+              variant="outlined"
+              density="compact"
+              rows="1"
+              max-rows="4"
+              auto-grow
+              bg-color="white"
+              @keydown="onKeydown"
+            />
+            <v-btn
+              type="submit"
+              color="primary"
+              height="40"
+              class="px-6 text-none font-weight-bold"
+              :disabled="!newMessageText.trim() || isSending"
+            >
+              送信
+            </v-btn>
+          </v-form>
+        </div>
+      </footer>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.chat-app {
-  display: flex;
-  height: 100vh;
-  flex-direction: column;
-  background-color: #f7f9fc;
+.student-app {
+  position: fixed;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: 236px minmax(0, 1fr);
+  background: #f7f9fc;
   color: #1a2235;
   font-family: Inter, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
 }
-.chat-app, .chat-app :deep(*) { box-sizing: border-box; }
+.student-app, .student-app :deep(*) { box-sizing: border-box; }
 
-.chat-header {
-  display: flex;
-  height: 76px;
-  flex-shrink: 0;
-  align-items: center;
-  border-bottom: 1px solid #e4e9f1;
-  padding: 0 clamp(16px, 4vw, 40px);
-  background-color: #ffffff;
-}
-
-.header-content {
-  display: flex;
-  width: 100%;
-  max-width: 1240px;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 auto;
-}
-
-.header-left {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 12px;
-}
-.avatar {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 50%;
-  font-size: 15px;
-  font-weight: 800;
-}
-.avatar--student {
-  background: #dcf4e9;
-  color: #157653;
-}
-.identity {
+/* ---- 左サイドバー（人事画面と同じ構成・配色） ---- */
+.sidebar {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  border-right: 1px solid #e4e9f1;
+  background: #fff;
 }
+.brand {
+  display: flex;
+  height: 88px;
+  align-items: center;
+  gap: 13px;
+  padding: 0 22px;
+}
+.brand__mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: #1769ff;
+  box-shadow: 0 6px 14px rgb(23 105 255 / 25%);
+  color: #fff;
+}
+.brand div { display: flex; flex-direction: column; }
+.brand strong { font-size: 19px; letter-spacing: -.02em; }
+.brand small { margin-top: 2px; color: #69758b; font-size: 9px; font-weight: 700; }
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin: 0 14px;
+  border: 1px solid #e4e9f1;
+  border-radius: 11px;
+  padding: 14px;
+  background: linear-gradient(160deg, #f7faff, #fff);
+}
+.identity__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+.avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 800;
+}
+.avatar--student { background: #dcf4e9; color: #157653; }
 .identity__name {
   overflow: hidden;
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .identity__name small {
   margin-left: 4px;
   color: #69758b;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
 }
-.identity__meta {
+.identity__status {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  border-top: 1px dashed #e4e9f1;
+  padding-top: 10px;
 }
-.identity__meta-label {
-  color: #69758b;
-  font-size: 11px;
-  font-weight: 700;
-}
+.identity__status-label { color: #69758b; font-size: 10px; font-weight: 750; }
 
+.account-area { margin-top: auto; padding: 14px; }
 .logout {
   display: flex;
-  min-height: 38px;
+  width: 100%;
+  min-height: 43px;
   align-items: center;
+  gap: 12px;
   border: 1px solid #dee4ed;
   border-radius: 9px;
-  padding: 0 14px;
+  padding: 0 13px;
   background: #fff;
   color: #2c3850;
   cursor: pointer;
   font-size: 12px;
   font-weight: 650;
 }
-.logout:hover {
-  border-color: #f0b9b9;
-  background: #fff7f7;
-  color: #c03737;
+.logout:hover { border-color: #f0b9b9; background: #fff7f7; color: #c03737; }
+
+/* ---- 右：チャット本体（横幅いっぱいを使う） ---- */
+.chat-pane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 77px minmax(0, 1fr) auto;
+  background: #fff;
 }
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #e4e9f0;
+  padding: 0 clamp(16px, 3vw, 34px);
+}
+.chat-header__icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: #edf3ff;
+  color: #1769ff;
+}
+.chat-header h2 { margin: 0; font-size: 15px; font-weight: 750; }
+.chat-header p { margin: 3px 0 0; color: #768297; font-size: 11px; }
 
 .chat-messages {
-  flex-grow: 1;
   overflow-y: auto;
-  padding: 24px clamp(16px, 5vw, 56px);
+  padding: 24px clamp(16px, 3vw, 40px);
   background: #fbfcfe;
 }
-
 .messages-container {
   display: flex;
-  max-width: 1240px;
+  width: 100%;
+  max-width: 1400px;
   flex-direction: column;
   margin: 0 auto;
 }
-
 .empty-state {
   margin-top: 48px;
   color: #8994a6;
   font-size: 13px;
   text-align: center;
 }
-
 .chat-input-area {
-  flex-shrink: 0;
-  border-top: 1px solid #e4e9f1;
-  padding: 16px clamp(16px, 5vw, 56px);
-  background-color: #ffffff;
+  border-top: 1px solid #e4e9f0;
+  padding: 14px clamp(16px, 3vw, 40px);
+  background: #fff;
 }
-
 .input-container {
-  max-width: 1240px;
+  width: 100%;
+  max-width: 1400px;
   margin: 0 auto;
 }
 
@@ -619,8 +673,17 @@ const onKeydown = (e) => {
   text-align: right;
 }
 
-@media (max-width: 600px) {
-  .chat-header { height: 68px; }
-  .identity__name { font-size: 15px; }
+@media (max-width: 900px) {
+  /* 狭い画面ではサイドバーを上部バーに畳む（名前と選考状況は左に残す） */
+  .student-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { flex-direction: row; align-items: center; gap: 12px; border-right: 0; border-bottom: 1px solid #e4e9f1; padding: 10px 14px; }
+  .brand { display: none; }
+  .identity { flex: 1; flex-direction: row; align-items: center; justify-content: flex-start; gap: 14px; margin: 0; padding: 8px 12px; }
+  .identity__status { border-top: 0; border-left: 1px dashed #e4e9f1; padding: 0 0 0 12px; }
+  .account-area { margin: 0; padding: 0; }
+  .logout { width: auto; }
+  .logout span { display: none; }
+  .chat-pane { grid-template-rows: 64px minmax(0, 1fr) auto; }
+  .chat-header p { display: none; }
 }
 </style>

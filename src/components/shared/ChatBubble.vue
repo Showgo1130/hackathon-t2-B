@@ -53,7 +53,7 @@ defineProps({
   font-weight: 650;
 }
 .chat-bubble {
-  max-width: min(82%, 760px);
+  max-width: min(86%, 880px);
   border: 1px solid #e5e9ef;
   border-radius: 5px 13px 13px 13px;
   padding: 12px 16px;
@@ -67,7 +67,7 @@ defineProps({
 }
 .chat-bubble--wide {
   width: 100%;
-  max-width: min(94%, 720px);
+  max-width: min(96%, 700px);
   white-space: normal;
 }
 .chat-bubble--other {

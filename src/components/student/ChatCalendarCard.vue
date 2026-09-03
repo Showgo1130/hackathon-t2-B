@@ -134,6 +134,12 @@ const confirmAndSubmit = () => {
   emit("submit", slots)
 }
 
+const shortDateLabel = (dateStr) => {
+  if (!dateStr) return ""
+  const d = parseDate(dateStr)
+  return `${d.getMonth() + 1}月${d.getDate()}日(${"日月火水木金土"[d.getDay()]})`
+}
+
 const getDayNumber = (dateStr) => {
   if (!dateStr) return ""
   return parseDate(dateStr).getDate()
@@ -162,76 +168,80 @@ const hasSelection = (dateStr) => {
       送信済みの希望日時です（変更できません）
     </div>
 
-    <!-- Calendar View -->
-    <div v-for="month in calendarMonths" :key="month.title" class="month-view mb-4">
-      <div class="month-title text-center mb-2 font-weight-bold">{{ month.title }}</div>
-      <div class="calendar-grid">
-        <div class="day-header text-red">日</div>
-        <div class="day-header">月</div>
-        <div class="day-header">火</div>
-        <div class="day-header">水</div>
-        <div class="day-header">木</div>
-        <div class="day-header">金</div>
-        <div class="day-header text-blue">土</div>
+    <div class="calendar-body">
+      <!-- Calendar View -->
+      <div class="calendar-months">
+        <div v-for="month in calendarMonths" :key="month.title" class="month-view mb-4">
+          <div class="month-title text-center mb-2 font-weight-bold">{{ month.title }}</div>
+          <div class="calendar-grid">
+            <div class="day-header text-red">日</div>
+            <div class="day-header">月</div>
+            <div class="day-header">火</div>
+            <div class="day-header">水</div>
+            <div class="day-header">木</div>
+            <div class="day-header">金</div>
+            <div class="day-header text-blue">土</div>
 
-        <template v-for="(date, i) in month.days" :key="i">
-          <div v-if="!date" class="calendar-cell empty"></div>
-          <button
-            v-else
-            type="button"
-            class="calendar-cell date-cell"
-            :class="{
-              'in-range': isDateInRange(date),
-              'selected-date': date === selectedDate,
-              'has-selection': hasSelection(date),
-              'out-of-range': !isDateInRange(date)
-            }"
-            :disabled="!isDateInRange(date)"
-            @click="selectedDate = date"
-          >
-            {{ getDayNumber(date) }}
-          </button>
-        </template>
-      </div>
-    </div>
-
-    <v-divider class="my-4" />
-
-    <!-- Time slots for selected day -->
-    <div v-if="selectedDate" class="time-selection-area">
-      <div class="d-flex align-center justify-space-between mb-3">
-        <div class="time-title">
-          {{ selectedDate }} の時間帯
+            <template v-for="(date, i) in month.days" :key="i">
+              <div v-if="!date" class="calendar-cell empty"></div>
+              <button
+                v-else
+                type="button"
+                class="calendar-cell date-cell"
+                :class="{
+                  'in-range': isDateInRange(date),
+                  'selected-date': date === selectedDate,
+                  'has-selection': hasSelection(date),
+                  'out-of-range': !isDateInRange(date)
+                }"
+                :disabled="!isDateInRange(date)"
+                @click="selectedDate = date"
+              >
+                {{ getDayNumber(date) }}
+              </button>
+            </template>
+          </div>
         </div>
-        <v-checkbox
-          v-if="!readonly"
-          :model-value="isAllHoursSelectedForCurrent"
-          @update:model-value="toggleAllHoursForCurrent"
-          label="全ての時間帯可能"
-          color="primary"
-          density="compact"
-          hide-details
-          class="flex-grow-0"
-        ></v-checkbox>
       </div>
 
-      <div class="hour-grid">
-        <v-btn
-          v-for="hour in hours"
-          :key="hour"
-          type="button"
-          :variant="isSelectedOnCurrent(hour) ? 'flat' : 'outlined'"
-          :color="isSelectedOnCurrent(hour) ? 'primary' : 'grey-darken-1'"
-          :class="['hour-btn', { 'hour-btn--locked': readonly }]"
-          size="small"
-          @click="toggleHour(hour)"
-        >
-          {{ hour }}:00
-        </v-btn>
+      <!-- Time slots for selected day -->
+      <div class="calendar-side">
+        <div v-if="selectedDate" class="time-selection-area">
+          <div class="d-flex align-center justify-space-between mb-3">
+            <div class="time-title">
+              {{ shortDateLabel(selectedDate) }} の時間帯
+            </div>
+            <v-checkbox
+              v-if="!readonly"
+              :model-value="isAllHoursSelectedForCurrent"
+              @update:model-value="toggleAllHoursForCurrent"
+              label="全ての時間帯可能"
+              color="primary"
+              density="compact"
+              hide-details
+              class="flex-grow-0"
+            ></v-checkbox>
+          </div>
+
+          <div class="hour-grid">
+            <v-btn
+              v-for="hour in hours"
+              :key="hour"
+              type="button"
+              :variant="isSelectedOnCurrent(hour) ? 'flat' : 'outlined'"
+              :color="isSelectedOnCurrent(hour) ? 'primary' : 'grey-darken-1'"
+              :class="['hour-btn', { 'hour-btn--locked': readonly }]"
+              size="small"
+              @click="toggleHour(hour)"
+            >
+              {{ hour }}:00
+            </v-btn>
+          </div>
+        </div>
+        <div v-else class="pick-date-hint">
+          {{ readonly ? "日付を選ぶと、その日の時間帯を確認できます" : "日にちを選ぶと、時間帯を選べます" }}
+        </div>
       </div>
-    </div>
-    <div v-else-if="!readonly" class="text-caption text-medium-emphasis pick-date-hint">
-      日にちを選ぶと、時間帯を選べます
     </div>
 
     <v-divider class="my-4" v-if="!readonly" />
@@ -255,6 +265,17 @@ const hasSelection = (dateStr) => {
 <style scoped>
 .calendar-card {
   width: 100%;
+}
+/* 日付を選ぶと、その下に時間帯選択が現れる */
+.calendar-body {
+  display: flex;
+  flex-direction: column;
+}
+.calendar-months { min-width: 0; }
+.calendar-side {
+  min-width: 0;
+  border-top: 1px solid #eef1f6;
+  padding-top: 16px;
 }
 .calendar-grid {
   display: grid;
