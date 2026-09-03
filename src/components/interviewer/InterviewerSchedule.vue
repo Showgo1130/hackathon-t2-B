@@ -110,7 +110,7 @@ const copyZoomUrl = async () => {
     >
       <div class="d-flex align-center pa-4 ga-4">
         <v-avatar color="primary" size="44">
-          <span class="text-white text-subtitle-1">{{ item.studentName.slice(-2, -1) }}</span>
+          <span class="text-white text-subtitle-1">{{ item.studentName.slice(-2) }}</span>
         </v-avatar>
 
         <div class="flex-grow-1">
