@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "vite",
-    "seed": "node server/seed.js"
+    "seed": "node server/seed.js",
+    "test": "node --experimental-test-module-mocks --test \"tests/**/*.test.js\"",
+    "test:watch": "node --experimental-test-module-mocks --test --watch \"tests/**/*.test.js\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.113.0",

@@ -10,7 +10,7 @@ const roomOf = (conversationId) => `conv:${conversationId}`
 const YES_WORDS = ["はい", "可能", "大丈夫", "OK", "ok", "○", "空いて"]
 const NO_WORDS = ["いいえ", "不可", "無理", "NG", "ng", "×", "埋まって"]
 
-const parseYesNo = (text) => {
+export const parseYesNo = (text) => {
   if (YES_WORDS.some((w) => text.includes(w))) return true
   if (NO_WORDS.some((w) => text.includes(w))) return false
   return null

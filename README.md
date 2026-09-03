@@ -58,6 +58,22 @@ Windows は WSL2 上の Ubuntu、Mac はネイティブ環境で実行します�
 
 > HTTPSで動作させたい場合は `.env.sample` のコメントを参照して `.env` を作成すること。EC2運用時の `/etc/ssl/*` を読み込んでいた挙動は廃止し、`HTTPS=true` 指定時のみ証明書パスを読み込むようにした。
 
+## テスト
+
+```bash
+npm test          # 全テストを実行
+npm run test:watch
+```
+
+Node 標準のテストランナー（`node --test`）を使う。追加の依存パッケージは不要。
+
+- `tests/unit/` — 認証、チャット返信の可否判定、面接官の通知ストアの単体テスト
+- `tests/matching.test.js` — 照合エンジン（`server/matching.js`）。候補提出→空き確認→承認→確定、見送り、
+  ダブルブッキング防止、複数学生の同時進行を、リポジトリ層まで本物のコードで検証する
+- `tests/socketFlow.test.js` — Socket.io のハンドラを実サーバー・実クライアントで通しで検証する
+- `tests/helpers/fakeSupabase.js` — Supabase クライアントのインメモリ版。
+  テストでは `server/supabaseClient.js` だけを差し替えるので、DB以外は本番と同じコードが動く
+
 ## 機能
 
 ### 基本要件

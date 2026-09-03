@@ -13,7 +13,8 @@ const scheduleReminder = (io, calendarMessage) => {
   scheduledReminders.add(calendarMessage.id)
   const delay = Math.max(0, new Date(reminderAt).getTime() - Date.now())
   const timerDelay = Math.min(delay, 2_147_000_000)
-  setTimeout(async () => {
+  // リマインダーの待機だけでプロセスを生かし続けないようにする（サーバー本体はHTTPサーバーが保持する）
+  const timer = setTimeout(async () => {
     scheduledReminders.delete(calendarMessage.id)
     if (delay > timerDelay) return scheduleReminder(io, calendarMessage)
     try {
@@ -29,6 +30,7 @@ const scheduleReminder = (io, calendarMessage) => {
       io.to(roomOf(conversation.id)).emit("newMessage", reminder)
     } catch (error) { console.error("[schedule reminder] error", error) }
   }, timerDelay)
+  timer.unref?.()
 }
 
 export default async (io, socket) => {
