@@ -1,4 +1,4 @@
-import { studentsRepo } from "../server/repositories/students.js"
+import { studentsRepo, SELECTION_STATUSES } from "../server/repositories/students.js"
 import { interviewersRepo } from "../server/repositories/interviewers.js"
 import { conversationsRepo } from "../server/repositories/conversations.js"
 import { messagesRepo } from "../server/repositories/messages.js"
@@ -28,6 +28,20 @@ export default async (io, socket) => {
   await sendDashboard()
 
   socket.on("loadDashboard", sendDashboard)
+
+  // 選考状況（1次／2次／最終／内定／不採用）の更新
+  socket.on("updateSelectionStatus", async ({ studentId, status }) => {
+    const isUuid =
+      typeof studentId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(studentId)
+    if (!isUuid || !SELECTION_STATUSES.includes(status)) return
+    try {
+      await studentsRepo.updateSelectionStatus(studentId, status)
+      await sendDashboard()
+    } catch (err) {
+      console.error("updateSelectionStatus failed", err)
+    }
+  })
 
   socket.on("openConversation", async ({ conversationId }) => {
     const messages = await messagesRepo.listForConversation(conversationId)
