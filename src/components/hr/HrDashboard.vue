@@ -3,6 +3,8 @@ import { computed, inject, onMounted, onUnmounted, reactive, ref } from "vue"
 import { useRouter } from "vue-router"
 import socketManager from "../../socketManager.js"
 import { clearSession } from "../../session.js"
+import ChatBubble from "../shared/ChatBubble.vue"
+import ChatCalendarCard from "../student/ChatCalendarCard.vue"
 
 const session = inject("session")
 const router = useRouter()
@@ -288,6 +290,18 @@ const senderLabel = (msg) => {
   return "システム"
 }
 
+const bubbleAlign = (msg) => {
+  if (msg.sender_kind === "system") return "center"
+  return msg.sender_kind === "hr" ? "right" : "left"
+}
+const bubbleVariant = (msg) => (msg.sender_kind === "system" ? "system" : "default")
+
+const shortDate = (date) => {
+  const d = new Date(`${date}T00:00:00`)
+  return `${d.getMonth() + 1}/${d.getDate()}(${"日月火水木金土"[d.getDay()]})`
+}
+const slotChips = (msg) => (msg.payload?.slots ?? []).map((s) => `${shortDate(s.slotDate)} ${s.slotHour}:00`)
+
 const sendMessage = () => {
   if (!newMessageText.value.trim() || !selected.value?.conversationId) return
   socket.emit("sendMessage", { conversationId: selected.value.conversationId, body: newMessageText.value })
@@ -480,11 +494,43 @@ const logout = () => {
           </v-btn>
         </div>
 
-        <v-card variant="outlined" class="pa-4 mb-4" style="max-height: 420px; overflow-y: auto">
-          <div v-for="msg in messages" :key="msg.id" class="mb-3">
-            <div class="text-caption text-medium-emphasis">{{ senderLabel(msg) }}</div>
-            <div>{{ msg.body }}</div>
-          </div>
+        <v-card variant="outlined" rounded="xl" class="pa-4 mb-4 chat-panel" style="max-height: 420px; overflow-y: auto">
+          <template v-for="msg in messages" :key="msg.id">
+            <ChatBubble
+              v-if="msg.msg_type === 'calendar_request'"
+              :align="bubbleAlign(msg)"
+              :sender-label="senderLabel(msg)"
+            >
+              <ChatCalendarCard
+                :range-start="msg.payload.rangeStart"
+                :range-end="msg.payload.rangeEnd"
+                :readonly="true"
+              />
+            </ChatBubble>
+
+            <ChatBubble
+              v-else-if="msg.msg_type === 'calendar_submission'"
+              :align="bubbleAlign(msg)"
+              :sender-label="senderLabel(msg)"
+            >
+              <div class="mb-1">候補日時が送信されました</div>
+              <div class="d-flex flex-wrap ga-1">
+                <v-chip v-for="(chip, idx) in slotChips(msg)" :key="idx" size="x-small" color="primary" variant="tonal">
+                  {{ chip }}
+                </v-chip>
+              </div>
+            </ChatBubble>
+
+            <ChatBubble
+              v-else
+              :align="bubbleAlign(msg)"
+              :variant="bubbleVariant(msg)"
+              :sender-label="senderLabel(msg)"
+              :is-confirmed-notice="msg.msg_type === 'system_notice' && msg.body.includes('確定')"
+            >
+              {{ msg.body }}
+            </ChatBubble>
+          </template>
           <div v-if="messages.length === 0" class="text-medium-emphasis">まだメッセージはありません</div>
         </v-card>
 
@@ -559,6 +605,8 @@ const logout = () => {
 </template>
 
 <style scoped>
+.chat-panel {
+  background: #f4f6fb;
 .dash-grid {
   display: grid;
   grid-template-columns: 2fr 0.9fr 1.6fr 0.9fr 0.7fr;
