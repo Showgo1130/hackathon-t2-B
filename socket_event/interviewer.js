@@ -7,31 +7,6 @@ import { answerAvailability, respondToMatchApproval } from "../server/matching.j
 
 const roomOf = (conversationId) => `conv:${conversationId}`
 
-const YES_WORDS = ["はい", "可能", "大丈夫", "OK", "ok", "○", "空いて"]
-const NO_WORDS = ["いいえ", "不可", "無理", "NG", "ng", "×", "埋まって"]
-
-const parseYesNo = (text) => {
-  if (YES_WORDS.some((w) => text.includes(w))) return true
-  if (NO_WORDS.some((w) => text.includes(w))) return false
-  return null
-}
-
-// 未回答のavailability_checkのうち最新のものを探す（チャット直接返信の対象を特定する）
-const findUnansweredCheck = async (conversationId) => {
-  const history = await messagesRepo.listForConversation(conversationId)
-  // 同じ日時が別の依頼で来ることがあるため、依頼IDまで含めてキーにする
-  const keyOf = (m) => `${m.request_id}_${m.payload.slotDate}_${m.payload.slotHour}`
-  const answeredKeys = new Set(
-    history.filter((m) => m.msg_type === "availability_answer").map(keyOf)
-  )
-  const checks = history.filter((m) => m.msg_type === "availability_check")
-  for (let i = checks.length - 1; i >= 0; i -= 1) {
-    const key = keyOf(checks[i])
-    if (!answeredKeys.has(key)) return checks[i]
-  }
-  return null
-}
-
 export default async (io, socket) => {
   const { id: interviewerId } = socket.data.user
 
@@ -65,24 +40,19 @@ export default async (io, socket) => {
     await answerAvailability(io, { interviewerId, slotDate, slotHour, isAvailable })
   }
 
+  // 本文からは可否を推測しない。「空いていません」を肯定と読むような取り違えが起きるため、
+  // 空き確認への回答は通知内のボタン（answerAvailability）だけで受け付ける
   socket.on("sendMessage", safe(async ({ body }) => {
     if (!body || !body.trim()) return
     const conversation = await conversationPromise
-    const text = body.trim()
     const message = await messagesRepo.create({
       conversationId: conversation.id,
       senderKind: "interviewer",
       senderId: interviewerId,
-      body: text,
+      body: body.trim(),
       msgType: "text",
     })
     io.to(roomOf(conversation.id)).emit("newMessage", message)
-
-    const isAvailable = parseYesNo(text)
-    if (isAvailable !== null) {
-      const check = await findUnansweredCheck(conversation.id)
-      if (check) await respondToCheck(check, isAvailable)
-    }
   }))
 
   // 通知内のワンクリックボタンからの回答
@@ -148,8 +118,17 @@ export default async (io, socket) => {
 
   socket.on("loadSchedules", safe(sendSchedules))
 
+  // 通知の履歴。接続時に自動で送るが、購読を始めるのが遅れて取りこぼした
+  // クライアントからも取り直せるようにしておく
+  const sendInit = async () => {
+    const conversation = await conversationPromise
+    const history = await messagesRepo.listForConversation(conversation.id)
+    socket.emit("init", { conversationId: conversation.id, messages: history })
+  }
+
+  socket.on("loadInit", safe(sendInit))
+
   const conversation = await conversationPromise
   socket.join(roomOf(conversation.id))
-  const history = await messagesRepo.listForConversation(conversation.id)
-  socket.emit("init", { conversationId: conversation.id, messages: history })
+  await sendInit()
 }

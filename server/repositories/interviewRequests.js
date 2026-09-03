@@ -65,13 +65,15 @@ export const interviewRequestsRepo = {
     return data
   },
 
-  async confirm(id, { slotDate, slotHour }) {
+  // interviewerIds を渡すと、実際に参加する面接官だけに絞り込んで確定する
+  async confirm(id, { slotDate, slotHour, interviewerIds }) {
     const { data, error } = await supabase
       .from("interview_requests")
       .update({
         status: "confirmed",
         confirmed_date: slotDate,
         confirmed_hour: slotHour,
+        ...(interviewerIds ? { interviewer_ids: interviewerIds } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

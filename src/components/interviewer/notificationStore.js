@@ -6,7 +6,9 @@ import socketManager from "../../socketManager.js"
 
 const messages = reactive([])
 const loaded = ref(false)
-let bound = false
+// 購読中のソケット。ログアウト→ログインなどで張り直されると別インスタンスになるため、
+// フラグではなくインスタンスそのものを覚えておいて、変わっていたら購読し直す
+let boundSocket = null
 
 // 同じ日時が別の依頼で来ることがあるため、依頼IDまで含めてキーにする
 const keyOf = (msg) => `${msg.request_id}_${msg.payload.slotDate}_${msg.payload.slotHour}`
@@ -44,15 +46,28 @@ export const pendingCount = computed(() => pendingItems.value.length)
 // 履歴は新しい順（未対応は上の枠に出るのでここでは重複して出さない）
 export const historyItems = computed(() => [...messages].filter((m) => !needsAction(m)).reverse())
 
+const onInit = ({ messages: history }) => {
+  messages.splice(0, messages.length, ...history)
+  loaded.value = true
+}
+const onNewMessage = (message) => messages.push(message)
+
 const bind = () => {
-  if (bound) return
   const socket = socketManager.getInstance()
-  socket.on("init", ({ messages: history }) => {
-    messages.splice(0, messages.length, ...history)
-    loaded.value = true
-  })
-  socket.on("newMessage", (message) => messages.push(message))
-  bound = true
+  if (boundSocket === socket) return
+
+  // 前の接続の購読を外し、そのとき読み込んだ履歴も捨てる（別ユーザーの通知が残らないように）
+  boundSocket?.off("init", onInit)
+  boundSocket?.off("newMessage", onNewMessage)
+  messages.splice(0, messages.length)
+  loaded.value = false
+
+  socket.on("init", onInit)
+  socket.on("newMessage", onNewMessage)
+  boundSocket = socket
+
+  // 接続後に購読を始めた場合は init を取りこぼしているので、明示的に取り直す
+  if (socket.connected) socket.emit("loadInit")
 }
 
 export const useNotifications = () => {
