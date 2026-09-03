@@ -5,7 +5,11 @@ const props = defineProps({
   rangeStart: { type: String, required: true }, // "YYYY-MM-DD"
   rangeEnd: { type: String, required: true },
   hours: { type: Array, default: () => [9, 10, 11, 12, 13, 14, 15, 16, 17] },
-  readonly: { type: Boolean, default: false } // HR views this component as readonly if needed
+  readonly: { type: Boolean, default: false }, // HR views this component as readonly if needed
+  submittedSlots: { type: Array, default: () => [] }, // 提出済み { slotDate, slotHour } の一覧（readonly時の表示用）
+  heading: { type: String, default: "面接可能な時間帯を選択" }, // 空文字で見出しを隠せる
+  lockedNotice: { type: String, default: "送信済みの希望日時です（変更できません）" },
+  showHourSection: { type: Boolean, default: true } // 人事側など、時間帯の選択欄が不要な場合に false
 })
 
 const emit = defineEmits(["submit"])
@@ -66,22 +70,32 @@ const calendarMonths = computed(() => {
   })
 })
 
-const selectedDate = ref(rangeDates.value[0])
+const keyOf = (date, hour) => `${date}_${hour}`
+
 const selection = reactive(new Set())
 
-// Initialize selection with ALL hours for ALL dates
+// デフォルトでは何も選択しない。提出済みスロットがある場合はそれだけを反映する
 const initSelection = () => {
   selection.clear()
-  rangeDates.value.forEach(d => {
-    props.hours.forEach(h => {
-      selection.add(`${d}_${h}`)
-    })
+  props.submittedSlots.forEach(({ slotDate, slotHour }) => {
+    selection.add(keyOf(slotDate, slotHour))
   })
 }
 // Call immediately
 initSelection()
 
-const keyOf = (date, hour) => `${date}_${hour}`
+const selectedDate = ref(props.submittedSlots[0]?.slotDate ?? null)
+
+// 送信後に readonly として再描画されるため、提出済みスロットの反映を追従させる。
+// 親の再描画では配列の中身が変わらない限り選択状態を触らない
+const submittedKey = computed(() =>
+  props.submittedSlots.map(({ slotDate, slotHour }) => keyOf(slotDate, slotHour)).join(",")
+)
+watch(submittedKey, (key) => {
+  if (!key) return
+  initSelection()
+  selectedDate.value = props.submittedSlots[0].slotDate
+})
 const isSelected = (date, hour) => selection.has(keyOf(date, hour))
 const isSelectedOnCurrent = (hour) => isSelected(selectedDate.value, hour)
 
@@ -123,6 +137,12 @@ const confirmAndSubmit = () => {
   emit("submit", slots)
 }
 
+const shortDateLabel = (dateStr) => {
+  if (!dateStr) return ""
+  const d = parseDate(dateStr)
+  return `${d.getMonth() + 1}月${d.getDate()}日(${"日月火水木金土"[d.getDay()]})`
+}
+
 const getDayNumber = (dateStr) => {
   if (!dateStr) return ""
   return parseDate(dateStr).getDate()
@@ -133,99 +153,112 @@ const isDateInRange = (dateStr) => {
   return dateSet.value.has(dateStr)
 }
 
-const hasSelection = (dateStr) => {
-  if (!dateStr) return false
-  return props.hours.some(h => selection.has(keyOf(dateStr, h)))
-}
+// 候補のある日を塗るための集合（hours の既定値に無い時刻でも取りこぼさない）
+const datesWithSelection = computed(() => {
+  const dates = new Set()
+  selection.forEach((key) => dates.add(key.slice(0, key.lastIndexOf("_"))))
+  return dates
+})
+const hasSelection = (dateStr) => !!dateStr && datesWithSelection.value.has(dateStr)
 </script>
 
 <template>
   <div class="calendar-card">
-    <div class="text-subtitle-1 mb-1 font-weight-bold">
-      面接可能な時間帯を選択
+    <div v-if="heading" class="calendar-title">
+      {{ heading }}
     </div>
-    <div class="text-caption text-medium-emphasis mb-4">
+    <div class="calendar-range mb-3">
       対象期間: {{ rangeStart }} 〜 {{ rangeEnd }}
     </div>
-
-    <!-- Calendar View -->
-    <div v-for="month in calendarMonths" :key="month.title" class="month-view mb-4">
-      <div class="month-title text-center mb-2 font-weight-bold">{{ month.title }}</div>
-      <div class="calendar-grid">
-        <div class="day-header text-red">日</div>
-        <div class="day-header">月</div>
-        <div class="day-header">火</div>
-        <div class="day-header">水</div>
-        <div class="day-header">木</div>
-        <div class="day-header">金</div>
-        <div class="day-header text-blue">土</div>
-
-        <template v-for="(date, i) in month.days" :key="i">
-          <div v-if="!date" class="calendar-cell empty"></div>
-          <button
-            v-else
-            type="button"
-            class="calendar-cell date-cell"
-            :class="{
-              'in-range': isDateInRange(date),
-              'selected-date': date === selectedDate,
-              'has-selection': hasSelection(date),
-              'out-of-range': !isDateInRange(date)
-            }"
-            :disabled="!isDateInRange(date)"
-            @click="selectedDate = date"
-          >
-            {{ getDayNumber(date) }}
-          </button>
-        </template>
-      </div>
+    <div v-if="readonly && lockedNotice" class="calendar-locked mb-3">
+      {{ lockedNotice }}
     </div>
 
-    <v-divider class="my-4" />
+    <div class="calendar-body">
+      <!-- Calendar View -->
+      <div class="calendar-months">
+        <div v-for="month in calendarMonths" :key="month.title" class="month-view mb-4">
+          <div class="month-title text-center mb-2 font-weight-bold">{{ month.title }}</div>
+          <div class="calendar-grid">
+            <div class="day-header text-red">日</div>
+            <div class="day-header">月</div>
+            <div class="day-header">火</div>
+            <div class="day-header">水</div>
+            <div class="day-header">木</div>
+            <div class="day-header">金</div>
+            <div class="day-header text-blue">土</div>
 
-    <!-- Time slots for selected day -->
-    <div v-if="selectedDate" class="time-selection-area">
-      <div class="d-flex align-center justify-space-between mb-3">
-        <div class="text-subtitle-2 font-weight-bold">
-          {{ selectedDate }} の時間帯
+            <template v-for="(date, i) in month.days" :key="i">
+              <div v-if="!date" class="calendar-cell empty"></div>
+              <button
+                v-else
+                type="button"
+                class="calendar-cell date-cell"
+                :class="{
+                  'in-range': isDateInRange(date),
+                  'selected-date': date === selectedDate,
+                  'has-selection': hasSelection(date),
+                  'out-of-range': !isDateInRange(date)
+                }"
+                :disabled="!isDateInRange(date)"
+                @click="selectedDate = date"
+              >
+                {{ getDayNumber(date) }}
+              </button>
+            </template>
+          </div>
         </div>
-        <v-checkbox
-          v-if="!readonly"
-          :model-value="isAllHoursSelectedForCurrent"
-          @update:model-value="toggleAllHoursForCurrent"
-          label="全ての時間帯可能"
-          color="primary"
-          density="compact"
-          hide-details
-          class="flex-grow-0"
-        ></v-checkbox>
       </div>
 
-      <div class="hour-grid">
-        <v-btn
-          v-for="hour in hours"
-          :key="hour"
-          type="button"
-          :variant="isSelectedOnCurrent(hour) ? 'flat' : 'outlined'"
-          :color="isSelectedOnCurrent(hour) ? 'black' : 'grey-darken-1'"
-          class="hour-btn"
-          size="small"
-          :disabled="readonly"
-          @click="toggleHour(hour)"
-        >
-          {{ hour }}:00
-        </v-btn>
+      <!-- Time slots for selected day -->
+      <div v-if="showHourSection" class="calendar-side">
+        <div v-if="selectedDate" class="time-selection-area">
+          <div class="d-flex align-center justify-space-between mb-3">
+            <div class="time-title">
+              {{ shortDateLabel(selectedDate) }} の時間帯
+            </div>
+            <v-checkbox
+              v-if="!readonly"
+              :model-value="isAllHoursSelectedForCurrent"
+              @update:model-value="toggleAllHoursForCurrent"
+              label="全ての時間帯可能"
+              color="primary"
+              density="compact"
+              hide-details
+              class="flex-grow-0"
+            ></v-checkbox>
+          </div>
+
+          <div class="hour-grid">
+            <v-btn
+              v-for="hour in hours"
+              :key="hour"
+              type="button"
+              :variant="isSelectedOnCurrent(hour) ? 'flat' : 'outlined'"
+              :color="isSelectedOnCurrent(hour) ? 'primary' : 'grey-darken-1'"
+              :class="['hour-btn', { 'hour-btn--locked': readonly }]"
+              size="small"
+              @click="toggleHour(hour)"
+            >
+              {{ hour }}:00
+            </v-btn>
+          </div>
+        </div>
+        <div v-else class="pick-date-hint">
+          {{ readonly ? "日付を選ぶと、その日の時間帯を確認できます" : "日にちを選ぶと、時間帯を選べます" }}
+        </div>
       </div>
     </div>
 
     <v-divider class="my-4" v-if="!readonly" />
 
     <div v-if="!readonly" class="d-flex align-center justify-space-between">
-      <div class="text-caption">
+      <div class="selection-count">
         選択中の候補: <strong>{{ selection.size }}</strong> 件
       </div>
       <v-btn
-        color="black"
+        color="primary"
+        class="text-none font-weight-bold"
         :disabled="!canSubmit"
         @click="confirmAndSubmit"
       >
@@ -239,15 +272,29 @@ const hasSelection = (dateStr) => {
 .calendar-card {
   width: 100%;
 }
+/* 日付を選ぶと、その下に時間帯選択が現れる */
+.calendar-body {
+  display: flex;
+  flex-direction: column;
+}
+.calendar-months { min-width: 0; }
+.calendar-side {
+  min-width: 0;
+  border-top: 1px solid #eef1f6;
+  padding-top: 16px;
+}
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  gap: 5px;
+  max-width: 330px;
+  margin: 0 auto;
 }
 .day-header {
   text-align: center;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 700;
+  color: #69758b;
   padding: 4px 0;
 }
 .calendar-cell {
@@ -255,8 +302,9 @@ const hasSelection = (dateStr) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 650;
+  border-radius: 7px;
   border: 1px solid transparent;
 }
 .date-cell {
@@ -275,16 +323,17 @@ const hasSelection = (dateStr) => {
   border-color: #d1d5db;
 }
 .date-cell.has-selection {
-  background: #dbeafe;
-  border-color: #bfdbfe;
-  color: #1e40af;
-  font-weight: bold;
+  background: #edf3ff;
+  border-color: #b9d1ff;
+  color: #1c3a6e;
+  font-weight: 800;
 }
 .date-cell.selected-date {
-  background: #111827;
-  border-color: #111827;
-  color: white;
-  font-weight: bold;
+  background: #1769ff;
+  border-color: #1769ff;
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgb(23 105 255 / 25%);
 }
 .hour-grid {
   display: flex;
@@ -292,6 +341,49 @@ const hasSelection = (dateStr) => {
   gap: 8px;
 }
 .hour-btn {
-  min-width: 72px;
+  min-width: 78px;
+}
+/* readonly 時は色を保ったまま操作だけを止める */
+.hour-btn--locked {
+  pointer-events: none;
+}
+.pick-date-hint {
+  padding: 10px 0;
+  color: #8994a6;
+  text-align: center;
+}
+.calendar-title {
+  color: #1a2235;
+  font-size: 14px;
+  font-weight: 750;
+}
+.calendar-range {
+  color: #69758b;
+  font-size: 12px;
+}
+.calendar-locked {
+  border: 1px solid #d6e3fb;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #f4f8ff;
+  color: #1c3a6e;
+  font-size: 11px;
+  font-weight: 700;
+}
+.month-title {
+  color: #42506a;
+  font-size: 13px;
+}
+.time-title {
+  color: #1a2235;
+  font-size: 13px;
+  font-weight: 750;
+}
+.selection-count {
+  color: #69758b;
+  font-size: 12px;
+}
+.selection-count strong {
+  color: #1769ff;
 }
 </style>

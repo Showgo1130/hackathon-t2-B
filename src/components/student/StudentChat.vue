@@ -3,6 +3,7 @@ import { computed, inject, nextTick, onMounted, onUnmounted, reactive, ref } fro
 import { useRouter } from "vue-router"
 import socketManager from "../../socketManager.js"
 import { clearSession } from "../../session.js"
+import HrIcon from "../hr/ui/HrIcon.vue"
 import ChatBubble from "../shared/ChatBubble.vue"
 import ChatCalendarCard from "./ChatCalendarCard.vue"
 import SelectionStatusChip from "./SelectionStatusChip.vue"
@@ -16,6 +17,10 @@ const newMessageText = ref("")
 const selectionStatus = ref(null)
 const messagesEndRef = ref(null)
 const isSending = ref(false)
+const expandedLogs = reactive(new Set())
+
+const displayName = computed(() => session?.value?.name ?? session?.name ?? "")
+const avatarInitial = computed(() => displayName.value.slice(0, 1) || "?")
 
 // 同じ依頼に対して候補の追加を求められることがあるため、提出済みかどうかは
 // request_id ではなく「その依頼メッセージより後に提出があるか」で判定する
@@ -37,6 +42,25 @@ const pendingCalendarRequest = computed(() => {
 
 const isActiveCalendarRequest = (msg) => pendingCalendarRequest.value?.id === msg.id
 
+// 候補送信のログはバブルとしては描画せず、対応する依頼カレンダーの下にまとめる
+const visibleMessages = computed(() => messages.filter((m) => m.msg_type !== "calendar_submission"))
+
+const submissionFor = (msg) => {
+  const idx = messages.findIndex((m) => m.id === msg.id)
+  if (idx === -1) return null
+  return (
+    messages
+      .slice(idx + 1)
+      .find((m) => m.msg_type === "calendar_submission" && m.request_id === msg.request_id) ?? null
+  )
+}
+const submittedSlotsFor = (msg) => submissionFor(msg)?.payload?.slots ?? []
+
+const toggleLog = (id) => {
+  if (expandedLogs.has(id)) expandedLogs.delete(id)
+  else expandedLogs.add(id)
+}
+
 const senderLabel = (msg) => {
   if (msg.sender_kind === "student") return "あなた"
   if (msg.sender_kind === "hr") return "人事"
@@ -49,11 +73,52 @@ const bubbleAlign = (msg) => {
 }
 const bubbleVariant = (msg) => (msg.sender_kind === "system" ? "system" : "default")
 
+const isConfirmedNotice = (msg) =>
+  msg.msg_type === "system_notice" && (msg.payload?.confirmedDate != null || (msg.body ?? "").includes("確定しました"))
+
 const shortDate = (date) => {
   const d = new Date(`${date}T00:00:00`)
   return `${d.getMonth() + 1}/${d.getDate()}(${"日月火水木金土"[d.getDay()]})`
 }
-const slotChips = (msg) => (msg.payload?.slots ?? []).map((s) => `${shortDate(s.slotDate)} ${s.slotHour}:00`)
+const longDate = (date) => {
+  const d = new Date(`${date}T00:00:00`)
+  return `${d.getMonth() + 1}月${d.getDate()}日(${"日月火水木金土"[d.getDay()]})`
+}
+const hourLabel = (hour) => `${String(hour).padStart(2, "0")}:00`
+
+// 送信済み候補を日付ごとにまとめて、ログとして読みやすい形にする
+const groupedSlots = (msg) => {
+  const byDate = new Map()
+  submittedSlotsFor(msg).forEach(({ slotDate, slotHour }) => {
+    if (!byDate.has(slotDate)) byDate.set(slotDate, [])
+    byDate.get(slotDate).push(Number(slotHour))
+  })
+  return [...byDate.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, hours]) => ({ date, hours: hours.sort((a, b) => a - b) }))
+}
+
+// 確定通知は payload の日時を優先し、無い場合は本文から拾う
+const confirmedSlot = (msg) => {
+  let date = msg.payload?.confirmedDate ?? null
+  let hour = msg.payload?.confirmedHour ?? null
+  if (date == null || hour == null) {
+    const matched = (msg.body ?? "").match(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})/)
+    if (!matched) return null
+    date = matched[1]
+    hour = Number(matched[2])
+  }
+  return { date, hour }
+}
+const confirmedLabel = (msg) => {
+  const slot = confirmedSlot(msg)
+  if (!slot) return msg.body
+  return `${longDate(slot.date)} ${hourLabel(slot.hour)}`
+}
+const confirmedYear = (msg) => {
+  const slot = confirmedSlot(msg)
+  return slot ? `${new Date(`${slot.date}T00:00:00`).getFullYear()}年` : ""
+}
 
 const formatTime = (createdAt) => {
   if (!createdAt) return ""
@@ -63,7 +128,7 @@ const formatTime = (createdAt) => {
 
 const showDateDivider = (msg, idx) => {
   if (idx === 0) return true
-  const prev = messages[idx - 1]
+  const prev = visibleMessages.value[idx - 1]
   const prevDate = new Date(prev.created_at).toDateString()
   const curDate = new Date(msg.created_at).toDateString()
   return prevDate !== curDate
@@ -137,171 +202,454 @@ const onKeydown = (e) => {
 </script>
 
 <template>
-  <div class="chat-app">
-    <!-- Header -->
-    <header class="chat-header">
-      <div class="header-content">
-        <div class="header-left">
-          <h1 class="text-h6 font-weight-bold ma-0">{{ session?.name }} さんの面接チャット</h1>
-          <div class="d-flex align-center ga-2 ml-4">
-            <span class="text-body-2 text-medium-emphasis">選考状況:</span>
-            <SelectionStatusChip :status="selectionStatus" />
-          </div>
-        </div>
-        <v-btn variant="outlined" size="small" @click="logout">ログアウト</v-btn>
+  <div class="student-app">
+    <!-- 画面左：ユーザー情報（人事画面のサイドバーと同じ構成） -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand__mark"><HrIcon name="calendar" :size="25" :stroke-width="2" /></span>
+        <div><strong>Hiresch</strong><small>面接チャット</small></div>
       </div>
-    </header>
 
-    <!-- Messages Area -->
-    <div class="chat-messages">
-      <div class="messages-container">
-        <div v-if="messages.length === 0" class="text-center text-medium-emphasis mt-10">
-          まだメッセージがありません
+      <div class="identity">
+        <div class="identity__head">
+          <span class="avatar avatar--student">{{ avatarInitial }}</span>
+          <h1 class="identity__name">{{ displayName }}<small>さん</small></h1>
         </div>
+        <div class="identity__status">
+          <span class="identity__status-label">選考状況</span>
+          <SelectionStatusChip :status="selectionStatus" />
+        </div>
+      </div>
 
-        <template v-for="(msg, idx) in messages" :key="msg.id">
-          <div v-if="showDateDivider(msg, idx)" class="date-divider text-caption text-center my-4 text-medium-emphasis">
-            <span>{{ formatDateLabel(msg.created_at) }}</span>
+      <div class="account-area">
+        <button type="button" class="logout" @click="logout">
+          <HrIcon name="logout" :size="18" /><span>ログアウト</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="chat-pane">
+      <header class="chat-header">
+        <span class="chat-header__icon"><HrIcon name="chat" :size="18" /></span>
+        <div>
+          <h2>面接チャット</h2>
+          <p>人事担当者とのやり取りと日程調整をここで行います</p>
+        </div>
+      </header>
+
+      <!-- Messages Area -->
+      <div class="chat-messages">
+        <div class="messages-container">
+          <div v-if="visibleMessages.length === 0" class="empty-state">
+            まだメッセージがありません
           </div>
 
-          <ChatBubble
-            v-if="msg.msg_type === 'calendar_request' && isActiveCalendarRequest(msg)"
-            :align="bubbleAlign(msg)"
-            :sender-label="senderLabel(msg)"
-          >
-            <ChatCalendarCard
-              :range-start="msg.payload.rangeStart"
-              :range-end="msg.payload.rangeEnd"
-              @submit="(slots) => submitCalendar(msg.payload.requestId, slots)"
-            />
-            <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
-          </ChatBubble>
-
-          <ChatBubble
-            v-else-if="msg.msg_type === 'calendar_request'"
-            :align="bubbleAlign(msg)"
-            :sender-label="senderLabel(msg)"
-          >
-            <div class="text-body-2 text-medium-emphasis mb-1">{{ msg.body }}</div>
-            <v-chip size="x-small" variant="tonal" color="grey">回答済み</v-chip>
-            <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
-          </ChatBubble>
-
-          <ChatBubble
-            v-else-if="msg.msg_type === 'calendar_submission'"
-            :align="bubbleAlign(msg)"
-            :sender-label="senderLabel(msg)"
-          >
-            <div class="text-body-2 mb-2">候補日時を送信しました</div>
-            <div class="d-flex flex-wrap ga-1">
-              <v-chip v-for="(chip, chipIdx) in slotChips(msg)" :key="chipIdx" size="small" variant="outlined">
-                {{ chip }}
-              </v-chip>
+          <template v-for="(msg, idx) in visibleMessages" :key="msg.id">
+            <div v-if="showDateDivider(msg, idx)" class="date-divider">
+              <span>{{ formatDateLabel(msg.created_at) }}</span>
             </div>
-            <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
-          </ChatBubble>
 
-          <ChatBubble
-            v-else
-            :align="bubbleAlign(msg)"
-            :variant="bubbleVariant(msg)"
-            :sender-label="senderLabel(msg)"
-            :is-confirmed-notice="msg.msg_type === 'system_notice' && msg.body.includes('確定')"
-          >
-            {{ msg.body }}
-            <div v-if="msg.sender_kind !== 'system'" class="msg-time">{{ formatTime(msg.created_at) }}</div>
-          </ChatBubble>
-        </template>
-        <div ref="messagesEndRef" />
-      </div>
-    </div>
+            <!-- 日程調整カレンダー：送信後も表示したまま（読み取り専用）にする -->
+            <ChatBubble
+              v-if="msg.msg_type === 'calendar_request'"
+              :align="bubbleAlign(msg)"
+              :sender-label="senderLabel(msg)"
+              wide
+            >
+              <div class="calendar-intro">{{ msg.body }}</div>
+              <ChatCalendarCard
+                :range-start="msg.payload.rangeStart"
+                :range-end="msg.payload.rangeEnd"
+                :readonly="!isActiveCalendarRequest(msg)"
+                :submitted-slots="submittedSlotsFor(msg)"
+                @submit="(slots) => submitCalendar(msg.payload.requestId, slots)"
+              />
 
-    <!-- Input Area -->
-    <footer class="chat-input-area">
-      <div class="input-container">
-        <v-form @submit.prevent="sendMessage" class="d-flex ga-2 align-end">
-          <v-textarea
-            v-model="newMessageText"
-            placeholder="メッセージを入力... (Shift+Enterで改行)"
-            hide-details
-            variant="outlined"
-            density="compact"
-            rows="1"
-            max-rows="4"
-            auto-grow
-            bg-color="white"
-            @keydown="onKeydown"
-          />
-          <v-btn type="submit" color="black" height="40" class="px-6" :disabled="!newMessageText.trim() || isSending">
-            送信
-          </v-btn>
-        </v-form>
+              <div v-if="submissionFor(msg)" class="submit-log">
+                <button type="button" class="submit-log__toggle" @click="toggleLog(msg.id)">
+                  <span class="submit-log__badge">送信済み</span>
+                  <span class="submit-log__text">
+                    希望日時 {{ submittedSlotsFor(msg).length }} 件を送信しました
+                  </span>
+                  <span class="submit-log__time">{{ formatTime(submissionFor(msg).created_at) }}</span>
+                  <span class="submit-log__chevron" :class="{ 'is-open': expandedLogs.has(msg.id) }">▾</span>
+                </button>
+                <div v-if="expandedLogs.has(msg.id)" class="submit-log__body">
+                  <div v-for="group in groupedSlots(msg)" :key="group.date" class="submit-log__row">
+                    <span class="submit-log__date">{{ shortDate(group.date) }}</span>
+                    <span class="submit-log__hours">
+                      <span v-for="hour in group.hours" :key="hour" class="submit-log__hour">{{ hourLabel(hour) }}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="msg-time">{{ formatTime(msg.created_at) }}</div>
+            </ChatBubble>
+
+            <!-- 面接日程の確定通知 -->
+            <ChatBubble
+              v-else-if="isConfirmedNotice(msg)"
+              align="center"
+              :variant="bubbleVariant(msg)"
+              is-confirmed-notice
+            >
+              <div class="confirmed">
+                <div class="confirmed__head">面接日程が確定しました</div>
+                <div class="confirmed__body">
+                  <div class="confirmed__year">{{ confirmedYear(msg) }}</div>
+                  <div class="confirmed__value">{{ confirmedLabel(msg) }}</div>
+                  <div class="confirmed__note">当日は時間に余裕をもってご参加ください。</div>
+                </div>
+              </div>
+            </ChatBubble>
+
+            <ChatBubble
+              v-else
+              :align="bubbleAlign(msg)"
+              :variant="bubbleVariant(msg)"
+              :sender-label="senderLabel(msg)"
+            >
+              {{ msg.body }}
+              <div v-if="msg.sender_kind !== 'system'" class="msg-time">{{ formatTime(msg.created_at) }}</div>
+            </ChatBubble>
+          </template>
+          <div ref="messagesEndRef" />
+        </div>
       </div>
-    </footer>
+
+      <!-- Input Area -->
+      <footer class="chat-input-area">
+        <div class="input-container">
+          <v-form @submit.prevent="sendMessage" class="d-flex ga-3 align-end">
+            <v-textarea
+              v-model="newMessageText"
+              placeholder="メッセージを入力... (Shift+Enterで改行)"
+              hide-details
+              variant="outlined"
+              density="compact"
+              rows="1"
+              max-rows="4"
+              auto-grow
+              bg-color="white"
+              @keydown="onKeydown"
+            />
+            <v-btn
+              type="submit"
+              color="primary"
+              height="40"
+              class="px-6 text-none font-weight-bold"
+              :disabled="!newMessageText.trim() || isSending"
+            >
+              送信
+            </v-btn>
+          </v-form>
+        </div>
+      </footer>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.chat-app {
-  font-family: Inter, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+.student-app {
+  position: fixed;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: 236px minmax(0, 1fr);
+  background: #f7f9fc;
   color: #1a2235;
+  font-family: Inter, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+}
+.student-app, .student-app :deep(*) { box-sizing: border-box; }
+
+/* ---- 左サイドバー（人事画面と同じ構成・配色） ---- */
+.sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-right: 1px solid #e4e9f1;
+  background: #fff;
+}
+.brand {
+  display: flex;
+  height: 88px;
+  align-items: center;
+  gap: 13px;
+  padding: 0 22px;
+}
+.brand__mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: #1769ff;
+  box-shadow: 0 6px 14px rgb(23 105 255 / 25%);
+  color: #fff;
+}
+.brand div { display: flex; flex-direction: column; }
+.brand strong { font-size: 19px; letter-spacing: -.02em; }
+.brand small { margin-top: 2px; color: #69758b; font-size: 9px; font-weight: 700; }
+
+.identity {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background-color: #f7f9fc;
+  gap: 11px;
+  margin: 0 14px;
+  border: 1px solid #e4e9f1;
+  border-radius: 11px;
+  padding: 14px;
+  background: linear-gradient(160deg, #f7faff, #fff);
 }
-
-.chat-header {
-  background-color: #ffffff;
-  border-bottom: 1px solid #e4e9f1;
-  padding: 0 24px;
-  height: 64px;
+.identity__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+.avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 800;
+}
+.avatar--student { background: #dcf4e9; color: #157653; }
+.identity__name {
+  overflow: hidden;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.identity__name small {
+  margin-left: 4px;
+  color: #69758b;
+  font-size: 11px;
+  font-weight: 650;
+}
+.identity__status {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
-}
-
-.header-content {
-  display: flex;
   justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  max-width: 1000px;
-  margin: 0 auto;
+  gap: 8px;
+  border-top: 1px dashed #e4e9f1;
+  padding-top: 10px;
 }
+.identity__status-label { color: #69758b; font-size: 10px; font-weight: 750; }
 
-.header-left {
+.account-area { margin-top: auto; padding: 14px; }
+.logout {
+  display: flex;
+  width: 100%;
+  min-height: 43px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #dee4ed;
+  border-radius: 9px;
+  padding: 0 13px;
+  background: #fff;
+  color: #2c3850;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.logout:hover { border-color: #f0b9b9; background: #fff7f7; color: #c03737; }
+
+/* ---- 右：チャット本体（横幅いっぱいを使う） ---- */
+.chat-pane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 77px minmax(0, 1fr) auto;
+  background: #fff;
+}
+.chat-header {
   display: flex;
   align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #e4e9f0;
+  padding: 0 clamp(16px, 3vw, 34px);
 }
+.chat-header__icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: #edf3ff;
+  color: #1769ff;
+}
+.chat-header h2 { margin: 0; font-size: 15px; font-weight: 750; }
+.chat-header p { margin: 3px 0 0; color: #768297; font-size: 11px; }
 
 .chat-messages {
-  flex-grow: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 24px clamp(16px, 3vw, 40px);
+  background: #fbfcfe;
 }
-
 .messages-container {
-  max-width: 800px;
-  margin: 0 auto;
   display: flex;
+  width: 100%;
+  max-width: 1400px;
   flex-direction: column;
-}
-
-.chat-input-area {
-  background-color: #ffffff;
-  border-top: 1px solid #e4e9f1;
-  padding: 16px 24px;
-  flex-shrink: 0;
-}
-
-.input-container {
-  max-width: 800px;
   margin: 0 auto;
+}
+.empty-state {
+  margin-top: 48px;
+  color: #8994a6;
+  font-size: 13px;
+  text-align: center;
+}
+.chat-input-area {
+  border-top: 1px solid #e4e9f0;
+  padding: 14px clamp(16px, 3vw, 40px);
+  background: #fff;
+}
+.input-container {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.calendar-intro {
+  margin-bottom: 14px;
+  color: #42506a;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.submit-log {
+  margin-top: 16px;
+  border: 1px solid #d6e3fb;
+  border-radius: 10px;
+  background: #f4f8ff;
+  overflow: hidden;
+}
+.submit-log__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  padding: 10px 12px;
+  background: transparent;
+  color: #1c3a6e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.submit-log__toggle:hover {
+  background: #eaf1ff;
+}
+.submit-log__badge {
+  flex: 0 0 auto;
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: #1769ff;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 750;
+}
+.submit-log__text {
+  flex: 1;
+  font-weight: 650;
+}
+.submit-log__time {
+  color: #7d8aa2;
+  font-size: 11px;
+}
+.submit-log__chevron {
+  color: #4a6ea8;
+  font-size: 13px;
+  transition: transform .18s ease;
+}
+.submit-log__chevron.is-open {
+  transform: rotate(180deg);
+}
+.submit-log__body {
+  border-top: 1px solid #dbe6fb;
+  padding: 10px 12px 12px;
+  background: #fff;
+}
+.submit-log__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+}
+.submit-log__row + .submit-log__row {
+  border-top: 1px dashed #eef1f6;
+}
+.submit-log__date {
+  flex: 0 0 74px;
+  color: #1a2235;
+  font-size: 12px;
+  font-weight: 750;
+}
+.submit-log__hours {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.submit-log__hour {
+  border: 1px solid #dce5f5;
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: #f7f9fc;
+  color: #42506a;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.confirmed {
+  text-align: center;
+}
+.confirmed__head {
+  padding: 9px 16px;
+  background: linear-gradient(90deg, #1769ff, #4a8bff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.confirmed__body {
+  padding: 18px 20px 20px;
+}
+.confirmed__year {
+  color: #69758b;
+  font-size: 12px;
+  font-weight: 700;
+}
+.confirmed__value {
+  margin-top: 4px;
+  color: #10357a;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.confirmed__note {
+  margin-top: 10px;
+  color: #69758b;
+  font-size: 11px;
 }
 
 .date-divider {
   position: relative;
+  margin: 16px 0;
+  color: #8994a6;
+  font-size: 11px;
+  text-align: center;
 }
 .date-divider::before,
 .date-divider::after {
@@ -319,9 +667,23 @@ const onKeydown = (e) => {
   right: 0;
 }
 .msg-time {
+  margin-top: 6px;
+  color: #929bad;
   font-size: 11px;
-  color: #69758b;
-  margin-top: 4px;
   text-align: right;
+}
+
+@media (max-width: 900px) {
+  /* 狭い画面ではサイドバーを上部バーに畳む（名前と選考状況は左に残す） */
+  .student-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { flex-direction: row; align-items: center; gap: 12px; border-right: 0; border-bottom: 1px solid #e4e9f1; padding: 10px 14px; }
+  .brand { display: none; }
+  .identity { flex: 1; flex-direction: row; align-items: center; justify-content: flex-start; gap: 14px; margin: 0; padding: 8px 12px; }
+  .identity__status { border-top: 0; border-left: 1px dashed #e4e9f1; padding: 0 0 0 12px; }
+  .account-area { margin: 0; padding: 0; }
+  .logout { width: auto; }
+  .logout span { display: none; }
+  .chat-pane { grid-template-rows: 64px minmax(0, 1fr) auto; }
+  .chat-header p { display: none; }
 }
 </style>
