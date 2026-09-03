@@ -84,10 +84,10 @@ const SCHEDULE_STATUS_META = {
 const scheduleStatusKey = (studentId) => requestsByStudent(studentId)[0]?.status ?? "none"
 
 const scheduleMeta = (studentId) => {
-  const key = scheduleStatusKey(studentId)
+  const [latest] = requestsByStudent(studentId)
+  const key = latest?.status ?? "none"
   const meta = SCHEDULE_STATUS_META[key] ?? SCHEDULE_STATUS_META.none
-  if (key === "confirmed") {
-    const [latest] = requestsByStudent(studentId)
+  if (key === "confirmed" && latest?.confirmed_date && latest?.confirmed_hour != null) {
     return { ...meta, desc: `${latest.confirmed_date} ${String(latest.confirmed_hour).padStart(2, "0")}:00 に確定` }
   }
   return meta
