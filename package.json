@@ -11,6 +11,8 @@
     "seed": "node server/seed.js",
     "test": "node --experimental-test-module-mocks --test \"tests/*.test.js\" \"tests/unit/*.test.js\"",
     "test:watch": "node --experimental-test-module-mocks --test --watch \"tests/*.test.js\" \"tests/unit/*.test.js\"",
+    "demo:seed": "node scripts/seed-dashboard-demo.js",
+    "demo:clean": "node scripts/seed-dashboard-demo.js --clean",
     "db:backup": "node scripts/backup-db.js",
     "db:restore": "node scripts/restore-db.js",
     "db:clear": "node scripts/clear-db.js",
