@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
+import { useRouter } from "vue-router"
 import socketManager from "../../socketManager.js"
 
+const router = useRouter()
 const socket = socketManager.getInstance()
-const emit = defineEmits(["open-schedule"])
 
 const messages = reactive([])
 const newMessageText = ref("")
@@ -61,7 +62,7 @@ const onNewMessage = (message) => {
 
 const openSchedule = () => {
   decidedDialog.value = false
-  emit("open-schedule")
+  router.push({ name: "interviewer-schedules" })
 }
 
 onMounted(() => {
@@ -99,7 +100,13 @@ const answer = (msg, isAvailable) => {
 </script>
 
 <template>
-  <div>
+  <div class="iv-page">
+    <header class="page-header">
+      <span class="eyebrow">NOTIFICATIONS</span>
+      <h1>通知・チャット</h1>
+      <p>日程の確認依頼や確定通知が届きます。人事とのやり取りもここから行えます。</p>
+    </header>
+
     <v-card class="pa-4 mb-4" style="max-height: 480px; overflow-y: auto">
       <div v-for="msg in messages" :key="msg.id" class="mb-3">
         <div class="text-caption text-medium-emphasis">{{ senderLabel(msg) }}</div>
@@ -136,4 +143,18 @@ const answer = (msg, isAvailable) => {
 </template>
 
 <style scoped>
+.iv-page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 26px 30px 40px;
+  background: #f7f9fc;
+}
+.iv-page .page-header { margin-bottom: 22px; }
+.iv-page .eyebrow { color: #7a8699; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
+.iv-page h1 { margin: 4px 0 6px; font-size: 22px; letter-spacing: -.02em; }
+.iv-page .page-header p { margin: 0; color: #69758b; font-size: 12px; }
+
+@media (max-width: 820px) {
+  .iv-page { padding: 22px 18px 34px; }
+}
 </style>

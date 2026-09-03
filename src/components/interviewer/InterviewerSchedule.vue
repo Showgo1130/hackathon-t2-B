@@ -95,7 +95,14 @@ const copyZoomUrl = async () => {
 
 <template>
   <!-- 一覧画面 -->
-  <div v-if="!selected">
+  <div v-if="!selected" class="iv-page">
+    <header class="page-header">
+      <span class="eyebrow">SCHEDULES</span>
+      <h1>予定一覧</h1>
+      <p>確定した面接の日時と参加者を確認できます。ブロックを選ぶと詳細が開きます。</p>
+    </header>
+
+
     <v-tabs v-model="tab" color="primary" density="comfortable" class="mb-4">
       <v-tab value="upcoming">今後の予定（{{ upcoming.length }}）</v-tab>
       <v-tab value="past">過去の予定（{{ past.length }}）</v-tab>
@@ -133,7 +140,7 @@ const copyZoomUrl = async () => {
   </div>
 
   <!-- 詳細画面 -->
-  <div v-else>
+  <div v-else class="iv-page">
     <v-btn variant="text" class="mb-2 px-1" @click="backToList">&lt; 予定一覧に戻る</v-btn>
 
     <v-card variant="outlined" class="pa-5">
@@ -193,6 +200,20 @@ const copyZoomUrl = async () => {
 </template>
 
 <style scoped>
+.iv-page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 26px 30px 40px;
+  background: #f7f9fc;
+}
+.iv-page .page-header { margin-bottom: 22px; }
+.iv-page .eyebrow { color: #7a8699; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
+.iv-page h1 { margin: 4px 0 6px; font-size: 22px; letter-spacing: -.02em; }
+.iv-page .page-header p { margin: 0; color: #69758b; font-size: 12px; }
+
+@media (max-width: 820px) {
+  .iv-page { padding: 22px 18px 34px; }
+}
 .schedule-card {
   cursor: pointer;
   transition: box-shadow 0.15s ease;

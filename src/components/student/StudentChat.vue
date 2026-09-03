@@ -243,15 +243,17 @@ const onKeydown = (e) => {
 
 <style scoped>
 .chat-app {
+  font-family: Inter, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  color: #1a2235;
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background-color: #f9fafb;
+  background-color: #f7f9fc;
 }
 
 .chat-header {
   background-color: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e4e9f1;
   padding: 0 24px;
   height: 64px;
   display: flex;
@@ -288,7 +290,7 @@ const onKeydown = (e) => {
 
 .chat-input-area {
   background-color: #ffffff;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #e4e9f1;
   padding: 16px 24px;
   flex-shrink: 0;
 }
@@ -308,7 +310,7 @@ const onKeydown = (e) => {
   top: 50%;
   width: 40%;
   height: 1px;
-  background-color: #e5e7eb;
+  background-color: #e4e9f1;
 }
 .date-divider::before {
   left: 0;
@@ -318,7 +320,7 @@ const onKeydown = (e) => {
 }
 .msg-time {
   font-size: 11px;
-  color: #9ca3af;
+  color: #69758b;
   margin-top: 4px;
   text-align: right;
 }
