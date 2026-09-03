@@ -14,7 +14,6 @@ const navItems = [
   { label: "ダッシュボード", icon: "dashboard", route: "hr-dashboard" },
   { label: "チャット", icon: "chat", route: "hr-chat" },
   { label: "日程調整を作成", icon: "calendar", route: "hr-schedule-create" },
-  { label: "ユーザー管理", icon: "user-plus", route: "hr-users" },
 ]
 
 const displayName = computed(() => session?.value?.name || "人事")
