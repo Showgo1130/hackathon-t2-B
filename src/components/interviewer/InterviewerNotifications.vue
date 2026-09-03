@@ -3,10 +3,8 @@ import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
 import socketManager from "../../socketManager.js"
 
 const socket = socketManager.getInstance()
-const emit = defineEmits(["open-schedule"])
 
 const messages = reactive([])
-const newMessageText = ref("")
 
 // 同じ日時が別の依頼で来ることがあるため、依頼IDまで含めてキーにする
 const keyOf = (msg) => `${msg.request_id}_${msg.payload.slotDate}_${msg.payload.slotHour}`
@@ -27,6 +25,12 @@ const settledRequestIds = computed(
         .filter((m) => m.msg_type === "system_notice" && m.payload?.confirmedDate)
         .map((m) => m.request_id)
     )
+)
+
+const openActions = computed(() =>
+  messages.filter(
+    (m) => (m.msg_type === "availability_check" && isCheckOpen(m)) || (isApprovalRequest(m) && isApprovalOpen(m))
+  )
 )
 
 const isCheckOpen = (msg) => !answeredKeys.value.has(keyOf(msg)) && !settledRequestIds.value.has(msg.request_id)
@@ -59,10 +63,7 @@ const onNewMessage = (message) => {
   }
 }
 
-const openSchedule = () => {
-  decidedDialog.value = false
-  emit("open-schedule")
-}
+
 
 onMounted(() => {
   socket.on("init", onInit)
@@ -72,12 +73,6 @@ onUnmounted(() => {
   socket.off("init", onInit)
   socket.off("newMessage", onNewMessage)
 })
-
-const sendMessage = () => {
-  if (!newMessageText.value.trim()) return
-  socket.emit("sendMessage", { body: newMessageText.value })
-  newMessageText.value = ""
-}
 
 const respondToMatch = (msg, approved) => {
   socket.emit("respondToMatch", {
@@ -99,41 +94,89 @@ const answer = (msg, isAvailable) => {
 </script>
 
 <template>
-  <div>
-    <v-card class="pa-4 mb-4" style="max-height: 480px; overflow-y: auto">
-      <div v-for="msg in messages" :key="msg.id" class="mb-3">
+  <section class="chat-panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">通知</div>
+        <div class="panel-sub">日程の確認依頼と確定通知が届きます</div>
+      </div>
+      <span v-if="openActions.length > 0" class="pending-badge">未対応 {{ openActions.length }}</span>
+    </div>
+
+    <div class="message-list">
+      <div
+        v-for="msg in messages"
+        :key="msg.id"
+        class="message"
+        :class="{ 'message--action': (msg.msg_type === 'availability_check' && isCheckOpen(msg)) || (isApprovalRequest(msg) && isApprovalOpen(msg)) }"
+      >
         <div class="text-caption text-medium-emphasis">{{ senderLabel(msg) }}</div>
-        <div>{{ msg.body }}</div>
-        <div v-if="msg.msg_type === 'availability_check' && isCheckOpen(msg)" class="mt-1 d-flex ga-2">
+        <div class="text-body-2">{{ msg.body }}</div>
+        <div v-if="msg.msg_type === 'availability_check' && isCheckOpen(msg)" class="mt-2 d-flex ga-2 flex-wrap">
           <v-btn size="small" color="success" @click="answer(msg, true)">空いています</v-btn>
-          <v-btn size="small" color="error" @click="answer(msg, false)">空いていません</v-btn>
+          <v-btn size="small" color="error" variant="tonal" @click="answer(msg, false)">空いていません</v-btn>
         </div>
-        <div v-if="isApprovalRequest(msg) && isApprovalOpen(msg)" class="mt-1 d-flex ga-2">
+        <div v-if="isApprovalRequest(msg) && isApprovalOpen(msg)" class="mt-2 d-flex ga-2 flex-wrap">
           <v-btn size="small" color="primary" @click="respondToMatch(msg, true)">この日程で承認</v-btn>
           <v-btn size="small" color="error" variant="tonal" @click="respondToMatch(msg, false)">この日程を見送る</v-btn>
         </div>
       </div>
-      <div v-if="messages.length === 0" class="text-medium-emphasis">まだメッセージはありません</div>
-    </v-card>
-
-    <v-form @submit.prevent="sendMessage" class="d-flex ga-2">
-      <v-text-field v-model="newMessageText" placeholder="メッセージを入力（はい/いいえ でも回答できます）" hide-details density="compact" />
-      <v-btn type="submit" color="primary">送信</v-btn>
-    </v-form>
+      <div v-if="messages.length === 0" class="text-medium-emphasis text-body-2">通知はありません</div>
+    </div>
 
     <v-dialog v-model="decidedDialog" max-width="420" persistent>
       <v-card class="pa-6 text-center">
         <div class="text-h6 font-weight-medium mb-1">面接日程が決定しました</div>
         <div class="text-h5 font-weight-medium text-primary my-4">{{ decidedText }}</div>
-        <div class="text-body-2 text-medium-emphasis mb-5">予定一覧から詳細（Zoom URL など）を確認できます</div>
-        <div class="d-flex ga-2 justify-center">
-          <v-btn variant="text" @click="decidedDialog = false">閉じる</v-btn>
-          <v-btn color="primary" @click="openSchedule">予定一覧を見る</v-btn>
-        </div>
+        <div class="text-body-2 text-medium-emphasis mb-5">予定一覧に追加されました。詳細から Zoom URL を確認できます</div>
+        <v-btn color="primary" @click="decidedDialog = false">閉じる</v-btn>
       </v-card>
     </v-dialog>
-  </div>
+  </section>
 </template>
 
 <style scoped>
+.chat-panel {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid #e4e9f1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 16px;
+}
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef1f6;
+}
+.panel-title { font-size: 14px; font-weight: 700; }
+.panel-sub { margin-top: 3px; color: #69758b; font-size: 11px; }
+.pending-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fdf1e0;
+  padding: 4px 10px;
+  color: #c2740a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.message-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+.message { margin-bottom: 12px; }
+.message--action {
+  border-left: 3px solid #1769ff;
+  border-radius: 0 8px 8px 0;
+  background: #f5f8ff;
+  padding: 10px 12px;
+}
 </style>

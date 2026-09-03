@@ -56,10 +56,10 @@ defineProps({
   line-height: 1.5;
   word-break: break-word;
   white-space: pre-wrap;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e4e9f1;
 }
 .chat-bubble--other {
-  background: #f9fafb;
+  background: #f7f9fc;
   color: #111827;
 }
 .chat-bubble--own {

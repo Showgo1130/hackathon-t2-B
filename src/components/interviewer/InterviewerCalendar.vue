@@ -93,7 +93,13 @@ const onCellsSelect = ({ cells }) => {
 </script>
 
 <template>
-  <div>
+  <div class="iv-page">
+    <header class="page-header">
+      <span class="eyebrow">AVAILABILITY</span>
+      <h1>空き予定登録</h1>
+      <p>面接可能な時間帯を登録します。ここで登録した空きが日程の自動照合に使われます。</p>
+    </header>
+
     <div class="d-flex align-center flex-wrap ga-3 mb-2">
       <v-btn-toggle v-model="paintMode" density="compact" color="primary" mandatory variant="outlined">
         <v-btn value="available" size="small">○ 空き</v-btn>
@@ -120,4 +126,18 @@ const onCellsSelect = ({ cells }) => {
 </template>
 
 <style scoped>
+.iv-page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 26px 30px 40px;
+  background: #f7f9fc;
+}
+.iv-page .page-header { margin-bottom: 22px; }
+.iv-page .eyebrow { color: #7a8699; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
+.iv-page h1 { margin: 4px 0 6px; font-size: 22px; letter-spacing: -.02em; }
+.iv-page .page-header p { margin: 0; color: #69758b; font-size: 12px; }
+
+@media (max-width: 820px) {
+  .iv-page { padding: 22px 18px 34px; }
+}
 </style>

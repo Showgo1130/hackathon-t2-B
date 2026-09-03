@@ -261,8 +261,8 @@ const hasSelection = (dateStr) => {
 }
 .date-cell {
   cursor: pointer;
-  background: #f9fafb;
-  border-color: #e5e7eb;
+  background: #f7f9fc;
+  border-color: #e4e9f1;
 }
 .date-cell.out-of-range {
   color: #d1d5db;
