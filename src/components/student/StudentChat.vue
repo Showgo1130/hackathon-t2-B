@@ -13,15 +13,15 @@ const messages = reactive([])
 const newMessageText = ref("")
 const selection = reactive(new Set())
 
-const submittedRequestIds = computed(
-  () => new Set(messages.filter((m) => m.msg_type === "calendar_submission").map((m) => m.request_id))
-)
-
+// 同じ依頼に対して候補の追加を求められることがあるため、提出済みかどうかは
+// request_id ではなく「その依頼メッセージより後に提出があるか」で判定する
 const pendingCalendarRequest = computed(() => {
-  const candidates = messages.filter(
-    (m) => m.msg_type === "calendar_request" && !submittedRequestIds.value.has(m.request_id)
-  )
-  return candidates[candidates.length - 1] ?? null
+  const lastRequestIndex = messages.findLastIndex((m) => m.msg_type === "calendar_request")
+  if (lastRequestIndex === -1) return null
+  const submittedAfter = messages
+    .slice(lastRequestIndex + 1)
+    .some((m) => m.msg_type === "calendar_submission" && m.request_id === messages[lastRequestIndex].request_id)
+  return submittedAfter ? null : messages[lastRequestIndex]
 })
 
 const senderLabel = (msg) => {

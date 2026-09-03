@@ -31,7 +31,7 @@ const logout = () => {
       <v-tab value="schedule">予定一覧</v-tab>
     </v-tabs>
 
-    <InterviewerChat v-if="tab === 'chat'" />
+    <InterviewerChat v-if="tab === 'chat'" @open-schedule="tab = 'schedule'" />
     <InterviewerCalendar v-else-if="tab === 'calendar'" />
     <InterviewerSchedule v-else />
   </div>

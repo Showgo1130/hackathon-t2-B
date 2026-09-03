@@ -3,7 +3,7 @@ import { messagesRepo } from "../server/repositories/messages.js"
 import { availabilityRepo } from "../server/repositories/availability.js"
 import { interviewRequestsRepo } from "../server/repositories/interviewRequests.js"
 import { interviewersRepo } from "../server/repositories/interviewers.js"
-import { answerAvailability } from "../server/matching.js"
+import { answerAvailability, respondToMatchApproval } from "../server/matching.js"
 
 const roomOf = (conversationId) => `conv:${conversationId}`
 
@@ -35,6 +35,16 @@ const findUnansweredCheck = async (conversationId) => {
 export default async (io, socket) => {
   const { id: interviewerId } = socket.data.user
 
+  // ハンドラ内の例外でプロセスが落ちないように包む
+  const safe = (handler) => async (payload) => {
+    try {
+      await handler(payload)
+    } catch (err) {
+      console.error("[interviewer]", err)
+      socket.emit("appError", { message: "処理に失敗しました。時間をおいて再度お試しください" })
+    }
+  }
+
   const conversation = await conversationsRepo.findOrCreateForInterviewer(interviewerId, null)
   socket.join(roomOf(conversation.id))
 
@@ -56,7 +66,7 @@ export default async (io, socket) => {
     await answerAvailability(io, { interviewerId, slotDate, slotHour, isAvailable })
   }
 
-  socket.on("sendMessage", async ({ body }) => {
+  socket.on("sendMessage", safe(async ({ body }) => {
     if (!body || !body.trim()) return
     const text = body.trim()
     const message = await messagesRepo.create({
@@ -73,22 +83,22 @@ export default async (io, socket) => {
       const check = await findUnansweredCheck(conversation.id)
       if (check) await respondToCheck(check, isAvailable)
     }
-  })
+  }))
 
   // 通知内のワンクリックボタンからの回答
-  socket.on("answerAvailability", async ({ slotDate, slotHour, isAvailable, requestId }) => {
+  socket.on("answerAvailability", safe(async ({ slotDate, slotHour, isAvailable, requestId }) => {
     const check = { payload: { slotDate, slotHour }, request_id: requestId ?? null }
     await respondToCheck(check, isAvailable)
-  })
+  }))
 
   // ⓪ 自分の空き予定カレンダー登録
-  socket.on("loadAvailability", async ({ rangeStart, rangeEnd }) => {
+  socket.on("loadAvailability", safe(async ({ rangeStart, rangeEnd }) => {
     const rows = await availabilityRepo.listForInterviewer(interviewerId, rangeStart, rangeEnd)
     socket.emit("availabilityData", rows)
-  })
+  }))
 
   // 単一セルも範囲選択もこの経路を通る。isAvailable が null のときは登録を取り消す
-  socket.on("setAvailability", async ({ cells, isAvailable }) => {
+  socket.on("setAvailability", safe(async ({ cells, isAvailable }) => {
     if (!Array.isArray(cells) || cells.length === 0) return
     if (isAvailable === null) {
       await availabilityRepo.deleteMany({ interviewerId, cells })
@@ -97,7 +107,13 @@ export default async (io, socket) => {
     }
     const rows = await availabilityRepo.upsertMany({ interviewerId, cells, isAvailable })
     socket.emit("availabilityUpdated", rows)
-  })
+  }))
+
+  // ④' マッチング結果への承認／見送りの回答
+  socket.on("respondToMatch", safe(async ({ requestId, slotDate, slotHour, approved }) => {
+    if (!requestId || !slotDate || slotHour === undefined || typeof approved !== "boolean") return
+    await respondToMatchApproval(io, { interviewerId, requestId, slotDate, slotHour, approved })
+  }))
 
   // 予定一覧：照合と承認で確定した面接を返す
   const sendSchedules = async () => {
@@ -130,5 +146,5 @@ export default async (io, socket) => {
     socket.emit("scheduleData", schedules)
   }
 
-  socket.on("loadSchedules", sendSchedules)
+  socket.on("loadSchedules", safe(sendSchedules))
 }
