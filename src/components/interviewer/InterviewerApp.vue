@@ -1,5 +1,5 @@
 <script setup>
-import { computed, inject, ref } from "vue"
+import { computed, inject, onMounted, onUnmounted, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { clearSession } from "../../session.js"
 import socketManager from "../../socketManager.js"
@@ -9,6 +9,15 @@ const route = useRoute()
 const router = useRouter()
 const session = inject("session")
 const mobileMenuOpen = ref(false)
+
+// サーバー側のハンドラが失敗したことを知らせる（黙って失敗させない）
+const socket = socketManager.getInstance()
+const errorMessage = ref("")
+const onAppError = ({ message }) => {
+  errorMessage.value = message ?? "処理に失敗しました"
+}
+onMounted(() => socket.on("appError", onAppError))
+onUnmounted(() => socket.off("appError", onAppError))
 
 const navItems = [
   { label: "ダッシュボード", icon: "dashboard", route: "interviewer-dashboard" },
@@ -65,6 +74,10 @@ const logout = () => {
     <main class="workspace">
       <RouterView />
     </main>
+
+    <v-snackbar :model-value="!!errorMessage" color="error" timeout="6000" @update:model-value="errorMessage = ''">
+      {{ errorMessage }}
+    </v-snackbar>
   </div>
 </template>
 
