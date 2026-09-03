@@ -71,14 +71,21 @@ const past = computed(() =>
 )
 const currentList = computed(() => (tab.value === "upcoming" ? upcoming.value : past.value))
 
-const SOON_MS = 3 * 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+const SOON_MS = 3 * DAY_MS
 const isSoon = (item) => item.startAt.getTime() - now.value.getTime() < SOON_MS && item.startAt.getTime() >= now.value.getTime()
 const isPast = (item) => item.startAt.getTime() < now.value.getTime()
+
+// 面接官が一番見たい情報なので、一覧の前に直近の予定を出す
+const nextSchedule = computed(() => upcoming.value[0] ?? null)
+const thisWeekCount = computed(
+  () => upcoming.value.filter((s) => s.startAt.getTime() - now.value.getTime() < 7 * DAY_MS).length
+)
 
 const openDetail = (item) => {
   selectedId.value = item.id
 }
-const backToList = () => {
+const closeDetail = () => {
   selectedId.value = null
 }
 
@@ -94,16 +101,27 @@ const copyZoomUrl = async () => {
 </script>
 
 <template>
-  <!-- 一覧画面 -->
-  <div v-if="!selected" class="iv-page">
-    <header class="page-header">
-      <span class="eyebrow">SCHEDULES</span>
-      <h1>予定一覧</h1>
-      <p>確定した面接の日時と参加者を確認できます。ブロックを選ぶと詳細が開きます。</p>
-    </header>
+  <section class="schedule-panel">
+    <div class="stat-row">
+      <div class="stat-card stat-card--next">
+        <div class="stat-label">次の面接</div>
+        <template v-if="nextSchedule">
+          <div class="stat-main">{{ formatRange(nextSchedule) }}</div>
+          <div class="stat-sub">{{ nextSchedule.studentName }}／{{ roundLabel(nextSchedule.round) }}</div>
+        </template>
+        <div v-else class="stat-sub">予定はありません</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">今週の面接</div>
+        <div class="stat-count">{{ thisWeekCount }}<span>件</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">今後の予定</div>
+        <div class="stat-count">{{ upcoming.length }}<span>件</span></div>
+      </div>
+    </div>
 
-
-    <v-tabs v-model="tab" color="primary" density="comfortable" class="mb-4">
+    <v-tabs v-model="tab" color="primary" density="comfortable" class="mb-3">
       <v-tab value="upcoming">今後の予定（{{ upcoming.length }}）</v-tab>
       <v-tab value="past">過去の予定（{{ past.length }}）</v-tab>
     </v-tabs>
@@ -137,90 +155,97 @@ const copyZoomUrl = async () => {
     <v-card v-if="currentList.length === 0" variant="outlined" class="pa-6 text-center text-medium-emphasis">
       {{ !loaded ? "読み込み中..." : tab === "upcoming" ? "今後の予定はありません" : "過去の予定はありません" }}
     </v-card>
-  </div>
 
-  <!-- 詳細画面 -->
-  <div v-else class="iv-page">
-    <v-btn variant="text" class="mb-2 px-1" @click="backToList">&lt; 予定一覧に戻る</v-btn>
+    <!-- 詳細は画面遷移ではなくダイアログで開き、一覧の文脈を保つ -->
+    <v-dialog :model-value="!!selected" max-width="520" @update:model-value="closeDetail">
+      <v-card v-if="selected" class="pa-5">
+        <div class="d-flex align-center ga-2 mb-4 flex-wrap">
+          <h2 class="text-h6 font-weight-medium">{{ selected.studentName }}</h2>
+          <v-chip size="small" color="primary" variant="tonal">{{ roundLabel(selected.round) }}</v-chip>
+        </div>
 
-    <v-card variant="outlined" class="pa-5">
-      <div class="d-flex align-center ga-2 mb-4 flex-wrap">
-        <h2 class="text-h6 font-weight-medium">{{ selected.studentName }}</h2>
-        <v-chip size="small" color="primary" variant="tonal">{{ roundLabel(selected.round) }}</v-chip>
-      </div>
+        <v-divider class="mb-4" />
 
-      <v-divider class="mb-4" />
+        <div class="detail-row">
+          <div class="detail-label">日時</div>
+          <div>{{ formatRange(selected) }}（{{ MEETING.durationMin }}分）</div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">参加者</div>
+          <div>{{ selected.attendees.join("、") }}</div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">形式</div>
+          <div>{{ MEETING.format }}</div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">Zoom URL</div>
+          <div class="d-flex align-center ga-2 flex-wrap">
+            <a :href="MEETING.zoomUrl" target="_blank" rel="noopener">{{ MEETING.zoomUrl }}</a>
+            <v-btn size="x-small" variant="tonal" @click="copyZoomUrl">
+              {{ copied ? "コピーしました" : "コピー" }}
+            </v-btn>
+          </div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">ミーティングID</div>
+          <div>{{ MEETING.zoomId }}</div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">パスコード</div>
+          <div>{{ MEETING.zoomPasscode }}</div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">備考</div>
+          <div>{{ MEETING.note }}</div>
+        </div>
 
-      <div class="detail-row">
-        <div class="detail-label">日時</div>
-        <div>{{ formatRange(selected) }}（{{ MEETING.durationMin }}分）</div>
-      </div>
-      <div class="detail-row">
-        <div class="detail-label">参加者</div>
-        <div>{{ selected.attendees.join("、") }}</div>
-      </div>
-      <div class="detail-row">
-        <div class="detail-label">形式</div>
-        <div>{{ MEETING.format }}</div>
-      </div>
-      <div class="detail-row">
-        <div class="detail-label">Zoom URL</div>
-        <div class="d-flex align-center ga-2 flex-wrap">
-          <a :href="MEETING.zoomUrl" target="_blank" rel="noopener" class="text-primary">{{ MEETING.zoomUrl }}</a>
-          <v-btn size="x-small" variant="tonal" @click="copyZoomUrl">
-            {{ copied ? "コピーしました" : "コピー" }}
+        <div class="d-flex justify-end ga-2 mt-4">
+          <v-btn variant="text" @click="closeDetail">閉じる</v-btn>
+          <v-btn
+            v-if="!isPast(selected)"
+            color="primary"
+            :href="MEETING.zoomUrl"
+            target="_blank"
+            rel="noopener"
+          >
+            Zoomに参加する
           </v-btn>
         </div>
-      </div>
-      <div class="detail-row">
-        <div class="detail-label">ミーティングID</div>
-        <div>{{ MEETING.zoomId }}</div>
-      </div>
-      <div class="detail-row">
-        <div class="detail-label">パスコード</div>
-        <div>{{ MEETING.zoomPasscode }}</div>
-      </div>
-      <div class="detail-row">
-        <div class="detail-label">備考</div>
-        <div>{{ MEETING.note }}</div>
-      </div>
-
-      <v-btn
-        v-if="!isPast(selected)"
-        color="primary"
-        class="mt-4"
-        :href="MEETING.zoomUrl"
-        target="_blank"
-        rel="noopener"
-      >
-        Zoomに参加する
-      </v-btn>
-    </v-card>
-  </div>
+      </v-card>
+    </v-dialog>
+  </section>
 </template>
 
 <style scoped>
-.iv-page {
-  height: 100%;
-  overflow-y: auto;
-  padding: 26px 30px 40px;
-  background: #f7f9fc;
+.stat-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  margin-bottom: 18px;
 }
-.iv-page .page-header { margin-bottom: 22px; }
-.iv-page .eyebrow { color: #7a8699; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
-.iv-page h1 { margin: 4px 0 6px; font-size: 22px; letter-spacing: -.02em; }
-.iv-page .page-header p { margin: 0; color: #69758b; font-size: 12px; }
+.stat-card {
+  border: 1px solid #e4e9f1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px 16px;
+}
+.stat-card--next { border-color: #d5e3ff; background: linear-gradient(90deg, #edf3ff, #f7faff); }
+.stat-label { color: #69758b; font-size: 11px; font-weight: 700; }
+.stat-main { margin-top: 6px; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.stat-sub { margin-top: 4px; color: #69758b; font-size: 12px; }
+.stat-count { margin-top: 6px; font-size: 24px; font-weight: 700; }
+.stat-count span { margin-left: 3px; color: #69758b; font-size: 12px; font-weight: 500; }
 
-@media (max-width: 820px) {
-  .iv-page { padding: 22px 18px 34px; }
-}
 .schedule-card {
   cursor: pointer;
-  transition: box-shadow 0.15s ease;
+  transition: box-shadow .15s ease, border-color .15s ease;
 }
 .schedule-card:hover {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  border-color: #b9d2ff;
+  box-shadow: 0 2px 10px rgb(23 105 255 / 12%);
 }
+
 .detail-row {
   display: flex;
   gap: 16px;
@@ -230,7 +255,12 @@ const copyZoomUrl = async () => {
 .detail-label {
   width: 110px;
   flex-shrink: 0;
-  color: rgba(0, 0, 0, 0.6);
+  color: #69758b;
   font-size: 0.875rem;
+}
+
+@media (max-width: 900px) {
+  .stat-row { grid-template-columns: 1fr 1fr; }
+  .stat-card--next { grid-column: 1 / -1; }
 }
 </style>

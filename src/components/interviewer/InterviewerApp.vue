@@ -11,9 +11,8 @@ const session = inject("session")
 const mobileMenuOpen = ref(false)
 
 const navItems = [
-  { label: "通知・チャット", icon: "chat", route: "interviewer-chat" },
+  { label: "ダッシュボード", icon: "dashboard", route: "interviewer-dashboard" },
   { label: "空き予定登録", icon: "calendar", route: "interviewer-availability" },
-  { label: "予定一覧", icon: "template", route: "interviewer-schedules" },
 ]
 
 const displayName = computed(() => session?.value?.name || "面接官")
