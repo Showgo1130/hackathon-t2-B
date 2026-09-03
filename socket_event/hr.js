@@ -59,18 +59,18 @@ export default async (io, socket) => {
   }
 
   const sendDashboard = async () => {
-    const [students, interviewers, requests, conversations, calendarRequests, studentMessages] = await Promise.all([
+    const [students, interviewers, requests, conversations, calendarRequests, unrepliedMessages] = await Promise.all([
       studentsRepo.list(),
       interviewersRepo.list(),
       interviewRequestsRepo.listAll(),
       joinAllConversations(),
       messagesRepo.listCalendarRequests(),
-      messagesRepo.listLatestStudentMessages(),
+      messagesRepo.listUnrepliedStudentMessages(),
     ])
     socket.emit("dashboardData", {
       students, interviewers, requests, conversations,
       requestMeta: buildRequestMeta(calendarRequests),
-      studentMessages,
+      unrepliedMessages,
     })
   }
 

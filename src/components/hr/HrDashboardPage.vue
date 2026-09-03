@@ -5,17 +5,16 @@ import socketManager from "../../socketManager.js"
 import { session } from "../../session.js"
 import HrCreateUserDialog from "./HrCreateUserDialog.vue"
 import HrIcon from "./ui/HrIcon.vue"
-import { lastReadAt, readAtMap } from "./readState.js"
 
 const router = useRouter()
 const socket = socketManager.getInstance()
 
 const students = reactive([])
 const requests = reactive([])
-// 提出期限と再依頼回数は依頼IDごと、学生の最新メッセージは会話IDごとにサーバーから届く
+// 提出期限と再依頼回数は依頼IDごと、未返信のメッセージは会話IDごとにサーバーから届く
 const requestMeta = reactive({})
 const conversations = reactive([])
-const studentMessages = reactive([])
+const unrepliedMessages = reactive([])
 
 const requestsByStudent = (studentId) =>
   requests.filter((r) => r.student_id === studentId).sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
@@ -168,8 +167,8 @@ const DAY_MS = 86_400_000
 const STALLED_DAYS = 2 // 面接官の回答が何日止まったら要対応にするか
 
 const TASK_TYPES = [
+  { key: "reply", icon: "💬", tone: "info", label: "まだ返信していません", action: "返信する" },
   { key: "overdue", icon: "⏰", tone: "danger", label: "提出期限が過ぎています", action: "催促する" },
-  { key: "reply", icon: "💬", tone: "info", label: "候補者から返信があります", action: "返信する" },
   { key: "dueToday", icon: "📅", tone: "warn", label: "本日が提出期限です", action: "催促する" },
   { key: "resubmit", icon: "🔁", tone: "warn", label: "候補が合わず、再提出を依頼中です", action: "期間を変えて再送" },
   { key: "stalled", icon: "🔄", tone: "warn", label: "面接官の回答が止まっています", action: "期間を変えて再送" },
@@ -178,21 +177,17 @@ const TASK_TYPES = [
 
 const studentIdByConversation = computed(() =>
   new Map(conversations.filter((c) => c.student_id).map((c) => [c.id, c.student_id])))
-const latestMessageByStudent = computed(() => {
+// 「人事が返していない候補者のメッセージ」。既読かどうかではなく返したかどうかで見るので、
+// 端末をまたいでも、人事が複数人いても同じ結果になる
+const unrepliedByStudent = computed(() => {
   const map = new Map()
-  for (const message of studentMessages) {
+  for (const message of unrepliedMessages) {
     const studentId = studentIdByConversation.value.get(message.conversation_id)
     if (studentId) map.set(studentId, message)
   }
   return map
 })
-// readAtMap を参照して、チャットを開いたら未読が消えるようにする
-const unreadMessage = (studentId) => {
-  void readAtMap.value
-  const message = latestMessageByStudent.value.get(studentId)
-  if (!message) return null
-  return new Date(message.created_at).getTime() > lastReadAt(studentId) ? message : null
-}
+const unrepliedMessage = (studentId) => unrepliedByStudent.value.get(studentId) ?? null
 
 const formatDateTime = (value) =>
   new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -209,14 +204,15 @@ const buildTask = (student) => {
   const request = activeRequest(student.id)
   const meta = request ? requestMeta[request.id] : null
   const deadline = meta?.responseDeadline ? new Date(meta.responseDeadline).getTime() : null
-  const unread = unreadMessage(student.id)
-  const base = { student, request, unread: Boolean(unread), roundLabel: nextRoundLabel(student.id) }
+  const unreplied = unrepliedMessage(student.id)
+  const base = { student, request, unreplied: Boolean(unreplied), roundLabel: nextRoundLabel(student.id) }
 
+  // 候補者が書いてきたなら、まず読んで返すのが次の一手。期限切れより先に立てる
+  if (unreplied) {
+    return { ...base, key: "reply", detail: `${formatDateTime(unreplied.created_at)}「${(unreplied.body ?? "").slice(0, 40)}」`, sortAt: new Date(unreplied.created_at).getTime() }
+  }
   if (request?.status === "awaiting_student" && deadline && deadline < now.value) {
     return { ...base, key: "overdue", detail: `提出期限 ${formatDateTime(deadline)} を ${elapsedLabel(now.value - deadline)} 過ぎています`, sortAt: deadline }
-  }
-  if (unread) {
-    return { ...base, key: "reply", detail: `${formatDateTime(unread.created_at)}「${(unread.body ?? "候補日時が届いています").slice(0, 40)}」`, sortAt: new Date(unread.created_at).getTime() }
   }
   if (request?.status === "awaiting_student" && deadline && isSameDay(deadline, now.value)) {
     return { ...base, key: "dueToday", detail: `提出期限は本日 ${formatDateTime(deadline)} です`, sortAt: deadline }
@@ -244,15 +240,86 @@ const tasks = computed(() => {
     .map((task) => ({ ...task, ...TASK_TYPES[order.indexOf(task.key)], priority: order.indexOf(task.key) }))
     .sort((a, b) => (a.priority - b.priority) || (a.sortAt - b.sortAt))
 })
-const taskCount = (key) => tasks.value.filter((task) => task.key === key).length
-const taskFilter = ref("all")
-const filteredTasks = computed(() =>
-  taskFilter.value === "all" ? tasks.value : tasks.value.filter((task) => task.key === taskFilter.value))
-const TASK_PREVIEW = 6
+// 1件ずつ全部並べると、未送信が多い日は画面がそれだけで埋まって
+// 本当に手を動かす作業が埋もれる。人事の動きに合わせて4つにまとめ、
+// 中身は開いたときだけ見せる
+const TASK_GROUPS = [
+  { key: "reply", types: ["reply"], icon: "💬", jump: "一覧で返信する" },
+  { key: "nudge", types: ["overdue", "dueToday"], icon: "⏰", jump: null },
+  { key: "stuck", types: ["resubmit", "stalled"], icon: "🔁", jump: null },
+  { key: "unsent", types: ["unsent"], icon: "📨", jump: "まとめて送る" },
+]
+
+const countOf = (items, key) => items.filter((item) => item.key === key).length
+
+const describeGroup = (key, items) => {
+  const n = items.length
+  if (key === "reply") {
+    return {
+      tone: "info",
+      title: `${n}人の候補者に、まだ返信していません`,
+      note: `いちばん古いメッセージは ${elapsedLabel(now.value - items[0].sortAt)} 前に届いています`,
+    }
+  }
+  if (key === "nudge") {
+    const overdue = countOf(items, "overdue")
+    return {
+      tone: overdue > 0 ? "danger" : "warn",
+      title: `${n}人の候補者から、まだ回答が届いていません`,
+      note: overdue > 0
+        ? `${overdue}人は提出期限を過ぎています${countOf(items, "dueToday") ? `／${countOf(items, "dueToday")}人は本日が期限です` : ""}`
+        : "本日が提出期限です",
+    }
+  }
+  if (key === "stuck") {
+    const resubmit = countOf(items, "resubmit")
+    const stalled = countOf(items, "stalled")
+    return {
+      tone: "warn",
+      title: `${n}件の日程調整が前に進んでいません`,
+      note: [resubmit ? `候補が合わず再提出待ち ${resubmit}件` : "", stalled ? `面接官の回答待ち ${stalled}件` : ""]
+        .filter(Boolean).join("／"),
+    }
+  }
+  const secondRound = items.filter((item) => confirmedCount(item.student.id) > 0).length
+  return {
+    tone: "muted",
+    title: `${n}人に、まだ日程調整を送っていません`,
+    note: secondRound > 0 ? `うち${secondRound}人は次の面接ぶんです` : "全員が初回の日程調整です",
+  }
+}
+
+const taskGroups = computed(() =>
+  TASK_GROUPS
+    .map((group) => {
+      const items = tasks.value.filter((task) => group.types.includes(task.key))
+      return items.length ? { ...group, items, count: items.length, ...describeGroup(group.key, items) } : null
+    })
+    .filter(Boolean))
+
+const openGroup = ref(null)
+const toggleGroup = (key) => { openGroup.value = openGroup.value === key ? null : key }
+const TASK_PREVIEW = 5
 const showAllTasks = ref(false)
-const visibleTasks = computed(() =>
-  showAllTasks.value ? filteredTasks.value : filteredTasks.value.slice(0, TASK_PREVIEW))
-watch(taskFilter, () => { showAllTasks.value = false })
+watch(openGroup, () => { showAllTasks.value = false })
+const openItems = computed(() => {
+  const group = taskGroups.value.find((item) => item.key === openGroup.value)
+  if (!group) return []
+  return showAllTasks.value ? group.items : group.items.slice(0, TASK_PREVIEW)
+})
+const openGroupTotal = computed(() =>
+  taskGroups.value.find((group) => group.key === openGroup.value)?.count ?? 0)
+
+// グループごとの一括導線。個別に開き直さなくても、その作業の場所へ直接入れる
+const runGroup = (group) => {
+  if (group.key === "reply") {
+    router.push({ name: "hr-chat", query: { filter: "unreplied" } })
+    return
+  }
+  if (group.key === "unsent") {
+    router.push({ name: "hr-schedule-create", query: { students: group.items.map((item) => item.student.id).join(",") } })
+  }
+}
 
 // 催促は文面を用意した状態でチャットを開く。人事が毎回書き起こさなくていいようにする
 const nudgeDraft = (student) =>
@@ -401,7 +468,7 @@ const onDashboardData = (data) => {
   students.splice(0, students.length, ...data.students)
   requests.splice(0, requests.length, ...data.requests)
   conversations.splice(0, conversations.length, ...(data.conversations ?? []))
-  studentMessages.splice(0, studentMessages.length, ...(data.studentMessages ?? []))
+  unrepliedMessages.splice(0, unrepliedMessages.length, ...(data.unrepliedMessages ?? []))
   Object.keys(requestMeta).forEach((key) => delete requestMeta[key])
   Object.assign(requestMeta, data.requestMeta ?? {})
 }
@@ -486,7 +553,7 @@ const createUser = async (user) => {
         <div>
           <div class="text-subtitle-1 font-weight-medium">今日やること</div>
           <small class="text-caption text-medium-emphasis">
-            上から順に片付ければ、提出期限切れと候補者からの返信を取りこぼしません。
+            人事が手を動かさないと止まるものだけを、上から順に並べています。
           </small>
         </div>
         <strong class="task-total" :class="{ 'task-total--zero': tasks.length === 0 }">
@@ -494,51 +561,61 @@ const createUser = async (user) => {
         </strong>
       </div>
 
-      <div class="task-chips">
-        <button type="button" :class="{ active: taskFilter === 'all' }" @click="taskFilter = 'all'">
-          すべて<i>{{ tasks.length }}</i>
-        </button>
-        <template v-for="type in TASK_TYPES" :key="type.key">
-          <button
-            v-if="taskCount(type.key) > 0"
-            type="button"
-            :class="[`chip--${type.tone}`, { active: taskFilter === type.key }]"
-            @click="taskFilter = type.key"
-          >{{ type.icon }} {{ type.label }}<i>{{ taskCount(type.key) }}</i></button>
-        </template>
-      </div>
+      <p v-if="!taskGroups.length" class="task-empty">✅ いま手を動かす必要のある候補者はいません。</p>
 
-      <p v-if="!tasks.length" class="task-empty">✅ 対応が必要な候補者はいません。</p>
-      <p v-else-if="!filteredTasks.length" class="task-empty">この条件に一致する作業はありません。</p>
-      <ul v-else class="task-list">
-        <li v-for="task in visibleTasks" :key="task.student.id" :class="`task task--${task.tone}`">
-          <span class="task__icon">{{ task.icon }}</span>
-          <div class="task__body">
-            <div class="task__title">
-              <strong>{{ task.student.name }}</strong>
-              <span class="task__round">{{ task.roundLabel }}</span>
-              <span v-if="task.unread" class="task__unread">未読</span>
-            </div>
-            <div class="task__label">{{ task.label }}</div>
-            <div class="task__detail">{{ task.detail }}</div>
-          </div>
-          <div class="task__actions">
-            <button type="button" class="task__primary" @click="runTask(task)">{{ task.action }}</button>
+      <ul v-else class="group-list">
+        <li v-for="group in taskGroups" :key="group.key" :class="`group group--${group.tone}`">
+          <div class="group__head">
             <button
               type="button"
-              class="task__secondary"
-              :title="`${task.student.name} さんとのチャットを開く`"
-              @click="goToChat(task.student)"
-            >💬</button>
+              class="group__row"
+              :aria-expanded="openGroup === group.key"
+              @click="toggleGroup(group.key)"
+            >
+              <span class="group__icon">{{ group.icon }}</span>
+              <span class="group__text">
+                <strong>{{ group.title }}</strong>
+                <small>{{ group.note }}</small>
+              </span>
+              <span class="group__toggle">{{ openGroup === group.key ? "閉じる ▲" : "内訳 ▼" }}</span>
+            </button>
+            <button v-if="group.jump" type="button" class="group__jump" @click="runGroup(group)">
+              {{ group.jump }}
+            </button>
           </div>
+
+          <ul v-if="openGroup === group.key" class="task-list">
+            <li v-for="task in openItems" :key="task.student.id" :class="`task task--${task.tone}`">
+              <span class="task__icon">{{ task.icon }}</span>
+              <div class="task__body">
+                <div class="task__title">
+                  <strong>{{ task.student.name }}</strong>
+                  <span class="task__round">{{ task.roundLabel }}</span>
+                  <span v-if="task.unreplied" class="task__unreplied">未返信</span>
+                </div>
+                <div class="task__label">{{ task.label }}</div>
+                <div class="task__detail">{{ task.detail }}</div>
+              </div>
+              <div class="task__actions">
+                <button type="button" class="task__primary" @click="runTask(task)">{{ task.action }}</button>
+                <button
+                  type="button"
+                  class="task__secondary"
+                  :title="`${task.student.name} さんとのチャットを開く`"
+                  @click="goToChat(task.student)"
+                >💬</button>
+              </div>
+            </li>
+          </ul>
+
+          <button
+            v-if="openGroup === group.key && openGroupTotal > TASK_PREVIEW"
+            type="button"
+            class="task-more"
+            @click="showAllTasks = !showAllTasks"
+          >{{ showAllTasks ? "折りたたむ" : `残り ${openGroupTotal - TASK_PREVIEW} 人を表示` }}</button>
         </li>
       </ul>
-      <button
-        v-if="filteredTasks.length > TASK_PREVIEW"
-        type="button"
-        class="task-more"
-        @click="showAllTasks = !showAllTasks"
-      >{{ showAllTasks ? "折りたたむ" : `残り ${filteredTasks.length - TASK_PREVIEW} 件を表示` }}</button>
     </v-card>
 
     <div class="dashboard-body">
@@ -882,22 +959,32 @@ const createUser = async (user) => {
 .task-total { color: #1769ff; font-size: 30px; line-height: 1; }
 .task-total span { margin-left: 3px; color: #7b879b; font-size: 12px; }
 .task-total--zero { color: #1a8a4c; }
-.task-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
-.task-chips button {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid #dce3ed; border-radius: 999px; padding: 6px 12px;
-  background: #fff; color: #4c5a72; font-size: 12px; font-weight: 600; cursor: pointer;
+/* 4つの作業のまとまり。中身は開いたときだけ出す */
+.group-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.group { border: 1px solid #e5eaf2; border-left: 4px solid #cbd5e3; border-radius: 10px; background: #fff; }
+.group--danger { border-left-color: #c9352a; }
+.group--warn { border-left-color: #e0930f; }
+.group--info { border-left-color: #1769ff; }
+.group--muted { border-left-color: #94a2b8; }
+.group__head { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; }
+.group__row {
+  display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px;
+  border: 0; border-radius: 8px; padding: 11px 10px; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
-.task-chips button i { border-radius: 999px; background: #eef1f6; padding: 1px 7px; font-size: 11px; font-style: normal; font-weight: 700; }
-.task-chips button:hover { border-color: #b7c9e9; }
-.task-chips button.active { border-color: #1769ff; background: #f2f7ff; color: #1769ff; }
-.task-chips button.active i { background: #dfeaff; color: #1769ff; }
-.task-chips .chip--danger.active { border-color: #c9352a; background: #fdeceb; color: #c9352a; }
-.task-chips .chip--danger.active i { background: #fbdcda; color: #c9352a; }
-.task-chips .chip--warn.active { border-color: #c2740a; background: #fdf4e7; color: #a86408; }
-.task-chips .chip--warn.active i { background: #f8e6c8; color: #a86408; }
+.group__row:hover { background: #f6f9fe; }
+.group__icon { flex-shrink: 0; font-size: 19px; }
+.group__text { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.group__text strong { font-size: 14px; }
+.group__text small { margin-top: 2px; color: #6b7789; font-size: 12px; }
+.group__toggle { flex-shrink: 0; color: #6b7789; font-size: 11px; font-weight: 700; }
+.group__jump {
+  flex-shrink: 0; min-height: 34px; border: 0; border-radius: 8px; padding: 0 14px;
+  background: #1769ff; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.group__jump:hover { background: #0f57d8; }
 
-.task-list { margin: 0; padding: 0; list-style: none; }
+.task-list { margin: 0; padding: 0 12px 10px; list-style: none; }
 .task {
   display: flex; align-items: center; gap: 12px;
   border: 1px solid #e5eaf2; border-left: 4px solid #cbd5e3; border-radius: 10px;
@@ -912,7 +999,7 @@ const createUser = async (user) => {
 .task__title { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .task__title strong { font-size: 14px; }
 .task__round { border-radius: 6px; background: #eef1f6; padding: 2px 7px; color: #55637c; font-size: 11px; font-weight: 700; }
-.task__unread { border-radius: 6px; background: #1769ff; padding: 2px 7px; color: #fff; font-size: 11px; font-weight: 700; }
+.task__unreplied { border-radius: 6px; background: #1769ff; padding: 2px 7px; color: #fff; font-size: 11px; font-weight: 700; }
 .task__label { margin-top: 3px; color: #2b3a52; font-size: 12px; font-weight: 700; }
 .task__detail { margin-top: 2px; color: #6b7789; font-size: 12px; }
 .task__actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
@@ -928,7 +1015,7 @@ const createUser = async (user) => {
 .task__secondary:hover { border-color: #1769ff; }
 .task-empty { margin: 12px 0 0; color: #6b7789; font-size: 13px; }
 .task-more {
-  width: 100%; border: 1px dashed #cfd8e6; border-radius: 8px; padding: 8px;
+  width: calc(100% - 24px); border: 1px dashed #cfd8e6; border-radius: 8px; margin: 0 12px 12px; padding: 8px;
   background: #fff; color: #4c5a72; font-size: 12px; font-weight: 700; cursor: pointer;
 }
 .task-more:hover { border-color: #1769ff; color: #1769ff; }

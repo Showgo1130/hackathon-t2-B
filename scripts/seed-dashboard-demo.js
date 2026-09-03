@@ -116,7 +116,7 @@ const CASES = [
     key: "reply",
     name: "デモ 井上 陽菜",
     selectionStatus: "second_interview",
-    expect: "💬 候補者から返信があります（未読）",
+    expect: "💬 まだ返信していません（日時提出は含めない）",
     build: async (ctx) => {
       const request = await createRequest({ ...ctx, status: "awaiting_student", rangeStart: daysFromNow(-1), rangeEnd: daysFromNow(13) })
       await createCalendarRequest({
@@ -124,7 +124,7 @@ const CASES = [
         rangeStart: daysFromNow(-1), rangeEnd: daysFromNow(13), deadline: daysFromNow(5),
         body: "面接可能な日時を選んでください", createdAt: daysFromNow(-1),
       })
-      // 未読判定の対象になるのは学生本人が書いた本文だけ
+      // 未返信の判定対象は、候補者本人が書いた本文だけ。候補日時の提出は含めない
       await insert("messages", {
         conversation_id: ctx.conversationId,
         sender_kind: "student",
@@ -132,6 +132,16 @@ const CASES = [
         body: "候補日を出したのですが、来週以降でも大丈夫でしょうか。",
         msg_type: "text",
         created_at: iso(new Date(Date.now() - 3 * 3_600_000)),
+      })
+      // 提出そのものは自動で照合まで進むので、これがあっても未返信にはならない
+      await insert("messages", {
+        conversation_id: ctx.conversationId,
+        sender_kind: "student",
+        sender_id: ctx.studentId,
+        body: "候補日時を提出しました",
+        msg_type: "calendar_submission",
+        payload: { slots: [{ slotDate: isoDate(daysFromNow(4)), slotHour: 10 }] },
+        created_at: iso(new Date(Date.now() - 2 * 3_600_000)),
       })
     },
   },
@@ -214,11 +224,22 @@ const CASES = [
     key: "settled",
     name: "デモ 中村 光",
     selectionStatus: "first_interview",
-    expect: "（対応不要。キューに出ないことの確認用）",
+    expect: "（対応不要。返信済みなのでキューに出ないことの確認用）",
     build: async (ctx) => {
       const request = await createRequest({
         ...ctx, status: "confirmed", rangeStart: daysFromNow(-10), rangeEnd: daysFromNow(4),
         updatedAt: daysFromNow(-2), confirmed: { date: daysFromNow(3), hour: 11 },
+      })
+      // 候補者が質問し、人事が返している。あとに人事の本文があるので未返信にはならない
+      await insert("messages", {
+        conversation_id: ctx.conversationId, sender_kind: "student", sender_id: ctx.studentId,
+        body: "当日の持ち物はありますか。", msg_type: "text",
+        created_at: iso(daysFromNow(-2)),
+      })
+      await insert("messages", {
+        conversation_id: ctx.conversationId, sender_kind: "hr", sender_id: ctx.hrId,
+        body: "特にありません。当日はお気をつけてお越しください。", msg_type: "text",
+        created_at: iso(new Date(daysFromNow(-2).getTime() + 3_600_000)),
       })
       await createCalendarRequest({
         conversationId: ctx.conversationId, requestId: request.id,

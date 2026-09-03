@@ -44,14 +44,14 @@ export const messagesRepo = {
     return data
   },
 
-  // 学生から届いた最新メッセージを会話ごとに1件返す（ダッシュボードの未読判定用）。
-  // 未読の判定にしか使わないので、全件ではなく直近分だけを見る
-  async listLatestStudentMessages(limit = 500) {
+  // 人事がまだ返していない、候補者からのメッセージを会話ごとに1件返す。
+  // 候補日時の提出は自動で照合まで進むので、人が読んで返す必要のある本文だけを見る。
+  // 会話ごとの最後の本文が候補者のものなら、人事はまだ返していない
+  async listUnrepliedStudentMessages(limit = 800) {
     const { data, error } = await supabase
       .from("messages")
-      .select("id, conversation_id, body, msg_type, created_at")
-      .eq("sender_kind", "student")
-      // 候補日時の提出は自動で照合まで進むので、人が読む必要のある本文だけを対象にする
+      .select("id, conversation_id, sender_kind, body, created_at")
+      .in("sender_kind", ["student", "hr"])
       .eq("msg_type", "text")
       .order("created_at", { ascending: false })
       .limit(limit)
@@ -60,7 +60,7 @@ export const messagesRepo = {
     for (const message of data) {
       if (!latest.has(message.conversation_id)) latest.set(message.conversation_id, message)
     }
-    return [...latest.values()]
+    return [...latest.values()].filter((message) => message.sender_kind === "student")
   },
 
   async updatePayload(id, payload) {
