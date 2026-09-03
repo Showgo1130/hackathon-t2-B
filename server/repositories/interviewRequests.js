@@ -81,6 +81,18 @@ export const interviewRequestsRepo = {
     return data
   },
 
+  // 確定済みの面接を日時順に取得する（面接官の予定一覧で使う）
+  async listConfirmed() {
+    const { data, error } = await supabase
+      .from("interview_requests")
+      .select("*, students(id, name)")
+      .eq("status", "confirmed")
+      .order("confirmed_date")
+      .order("confirmed_hour")
+    if (error) throw error
+    return data
+  },
+
   async listForHr(hrId) {
     const { data, error } = await supabase
       .from("interview_requests")

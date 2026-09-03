@@ -1,7 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router"
 import Login from "../components/Login.vue"
 import StudentChat from "../components/student/StudentChat.vue"
-import HrDashboard from "../components/hr/HrDashboard.vue"
+import HrRecruitmentApp from "../components/hr/HrRecruitmentApp.vue"
+import HrChatPage from "../components/hr/HrChatPage.vue"
+import HrChatRoomsPage from "../components/hr/HrChatRoomsPage.vue"
+import HrScheduleCreatePage from "../components/hr/HrScheduleCreatePage.vue"
+import HrSectionPlaceholder from "../components/hr/HrSectionPlaceholder.vue"
+import HrUserManagementPage from "../components/hr/HrUserManagementPage.vue"
 import InterviewerHome from "../components/interviewer/InterviewerHome.vue"
 import { session } from "../session.js"
 
@@ -29,9 +34,55 @@ const router = createRouter({
     },
     {
       path: "/hr",
-      name: "hr",
-      component: HrDashboard,
+      component: HrRecruitmentApp,
       beforeEnter: requireRole("hr"),
+      children: [
+        {
+          path: "",
+          name: "hr",
+          redirect: { name: "hr-chat" },
+        },
+        {
+          path: "chat",
+          name: "hr-chat",
+          component: HrChatRoomsPage,
+        },
+        {
+          path: "chat/:role/:id",
+          name: "hr-chat-room",
+          component: HrChatPage,
+        },
+        {
+          path: "schedules/new",
+          name: "hr-schedule-create",
+          component: HrScheduleCreatePage,
+        },
+        {
+          path: "sent",
+          name: "hr-sent",
+          component: HrSectionPlaceholder,
+        },
+        {
+          path: "candidates",
+          name: "hr-candidates",
+          component: HrSectionPlaceholder,
+        },
+        {
+          path: "interviewers",
+          name: "hr-interviewers",
+          component: HrSectionPlaceholder,
+        },
+        {
+          path: "settings",
+          name: "hr-settings",
+          component: HrSectionPlaceholder,
+        },
+        {
+          path: "users",
+          name: "hr-users",
+          component: HrUserManagementPage,
+        },
+      ],
     },
     {
       path: "/interviewer",

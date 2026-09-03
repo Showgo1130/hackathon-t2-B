@@ -17,15 +17,22 @@ const selectionStatus = ref(null)
 const messagesEndRef = ref(null)
 const isSending = ref(false)
 
-const submittedRequestIds = computed(
-  () => new Set(messages.filter((m) => m.msg_type === "calendar_submission").map((m) => m.request_id))
-)
+// 同じ依頼に対して候補の追加を求められることがあるため、提出済みかどうかは
+// request_id ではなく「その依頼メッセージより後に提出があるか」で判定する
+const findLastIndexOf = (list, predicate) => {
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (predicate(list[i])) return i
+  }
+  return -1
+}
 
 const pendingCalendarRequest = computed(() => {
-  const candidates = messages.filter(
-    (m) => m.msg_type === "calendar_request" && !submittedRequestIds.value.has(m.request_id)
-  )
-  return candidates[candidates.length - 1] ?? null
+  const lastRequestIndex = findLastIndexOf(messages, (m) => m.msg_type === "calendar_request")
+  if (lastRequestIndex === -1) return null
+  const submittedAfter = messages
+    .slice(lastRequestIndex + 1)
+    .some((m) => m.msg_type === "calendar_submission" && m.request_id === messages[lastRequestIndex].request_id)
+  return submittedAfter ? null : messages[lastRequestIndex]
 })
 
 const isActiveCalendarRequest = (msg) => pendingCalendarRequest.value?.id === msg.id
@@ -108,8 +115,20 @@ const sendMessage = async () => {
   setTimeout(() => { isSending.value = false }, 300)
 }
 
-const submitCalendar = (requestId, slots) => {
-  if (!slots || slots.length === 0) return
+
+const cellState = (date, hour) => (selection.has(`${date}_${hour}`) ? "selected" : "unset")
+// 単セルは選択の反転、範囲選択はまとめて選択（全て選択済みならまとめて解除）
+const onCellsSelect = ({ cells }) => {
+  const keys = cells.map(({ date, hour }) => `${date}_${hour}`)
+  const shouldDeselect = keys.every((key) => selection.has(key))
+  keys.forEach((key) => (shouldDeselect ? selection.delete(key) : selection.add(key)))
+}
+const submitCalendar = (requestId) => {
+  const slots = [...selection].map((key) => {
+    const [slotDate, hourStr] = key.split("_")
+    return { slotDate, slotHour: Number(hourStr) }
+  })
+  if (slots.length === 0) return
   socket.emit("submitCalendar", { requestId, slots })
 }
 
@@ -228,7 +247,27 @@ const onKeydown = (e) => {
           </v-btn>
         </v-form>
       </div>
-    </footer>
+
+      <div v-if="messages.length === 0" class="text-medium-emphasis">まだメッセージはありません</div>
+    </v-card>
+
+    <v-card v-if="pendingCalendarRequest" class="pa-4 mb-4">
+      <p class="mb-2">面接可能な時間帯を選んで送信してください</p>
+      <CalendarPicker
+        :range-start="pendingCalendarRequest.payload.rangeStart"
+        :range-end="pendingCalendarRequest.payload.rangeEnd"
+        :cell-state="cellState"
+        @cells-select="onCellsSelect"
+      />
+      <v-btn class="mt-3" color="primary" @click="submitCalendar(pendingCalendarRequest.payload.requestId)">
+        この内容で送信する
+      </v-btn>
+    </v-card>
+
+    <v-form @submit.prevent="sendMessage" class="d-flex ga-2">
+      <v-text-field v-model="newMessageText" placeholder="メッセージを入力" hide-details density="compact" />
+      <v-btn type="submit" color="primary">送信</v-btn>
+    </v-form>
   </div>
 </template>
 

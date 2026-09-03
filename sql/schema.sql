@@ -15,6 +15,11 @@ create table if not exists students (
   created_at timestamptz default now()
 );
 
+-- 選考状況（人事が管理）。既存プロジェクトに反映する場合はこのalterをSQL Editorで実行する
+alter table students
+  add column if not exists selection_status text not null default 'first_interview'
+    check (selection_status in ('first_interview','second_interview','final_interview','offered','rejected'));
+
 create table if not exists interviewers (
   id uuid primary key default gen_random_uuid(),
   name text not null,
