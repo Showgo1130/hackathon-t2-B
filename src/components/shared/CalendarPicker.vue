@@ -191,4 +191,10 @@ th, td {
   outline: 2px solid #34495e;
   outline-offset: -2px;
 }
+/* 未保存の変更（cellState に unsaved を含めると点線で示される） */
+.cell.unsaved {
+  border-style: dashed;
+  border-width: 2px;
+  border-color: #1a2235;
+}
 </style>
