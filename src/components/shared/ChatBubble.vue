@@ -4,6 +4,7 @@ defineProps({
   variant: { type: String, default: "default" }, // 'default' | 'system'
   senderLabel: { type: String, default: "" },
   isConfirmedNotice: { type: Boolean, default: false },
+  wide: { type: Boolean, default: false }, // カレンダーなど横幅を使いたい中身向け
 })
 </script>
 
@@ -21,8 +22,10 @@ defineProps({
       :class="{
         'chat-bubble--own': align === 'right',
         'chat-bubble--other': align === 'left',
+        'chat-bubble--center': align === 'center' && variant !== 'system' && !isConfirmedNotice,
         'chat-bubble--system': variant === 'system' && !isConfirmedNotice,
         'chat-bubble--system-confirmed': isConfirmedNotice,
+        'chat-bubble--wide': wide,
       }"
     >
       <slot />
@@ -35,7 +38,7 @@ defineProps({
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 .chat-row--right {
   align-items: flex-end;
@@ -44,43 +47,58 @@ defineProps({
   align-items: center;
 }
 .chat-row__label {
-  font-size: 12px;
-  color: #6b7280;
-  margin: 0 4px 4px;
+  margin: 0 4px 5px;
+  color: #768297;
+  font-size: 11px;
+  font-weight: 650;
 }
 .chat-bubble {
-  max-width: min(85%, 600px);
+  max-width: min(82%, 760px);
+  border: 1px solid #e5e9ef;
+  border-radius: 5px 13px 13px 13px;
   padding: 12px 16px;
-  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(35 49 75 / 3%);
+  color: #273348;
   font-size: 14px;
-  line-height: 1.5;
-  word-break: break-word;
+  line-height: 1.6;
   white-space: pre-wrap;
-  border: 1px solid #e4e9f1;
+  word-break: break-word;
+}
+.chat-bubble--wide {
+  width: 100%;
+  max-width: min(94%, 720px);
+  white-space: normal;
 }
 .chat-bubble--other {
-  background: #f7f9fc;
-  color: #111827;
+  background: #fff;
 }
 .chat-bubble--own {
-  background: #ffffff;
-  color: #111827;
-  border: 1px solid #d1d5db;
+  border-color: #d6e3fb;
+  border-radius: 13px 5px 13px 13px;
+  background: #edf3ff;
+  color: #163f82;
+}
+.chat-bubble--center {
+  border-radius: 13px;
 }
 .chat-bubble--system {
-  background: #f3f4f6;
-  color: #4b5563;
+  border-radius: 13px;
+  border-style: dashed;
+  background: #f7f9fc;
+  color: #5c6a83;
   font-size: 13px;
   text-align: center;
-  border-style: dashed;
 }
 .chat-bubble--system-confirmed {
-  background: #ecfdf5;
-  color: #065f46;
-  font-size: 15px;
-  font-weight: bold;
-  text-align: center;
-  border: 2px solid #10b981;
-  padding: 16px 24px;
+  width: 100%;
+  max-width: min(94%, 560px);
+  border: 2px solid #1769ff;
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 10px 26px rgb(23 105 255 / 18%);
+  white-space: normal;
 }
 </style>

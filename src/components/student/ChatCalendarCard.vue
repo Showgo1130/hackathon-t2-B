@@ -82,6 +82,17 @@ const initSelection = () => {
 initSelection()
 
 const selectedDate = ref(props.submittedSlots[0]?.slotDate ?? null)
+
+// 送信後に readonly として再描画されるため、提出済みスロットの反映を追従させる。
+// 親の再描画では配列の中身が変わらない限り選択状態を触らない
+const submittedKey = computed(() =>
+  props.submittedSlots.map(({ slotDate, slotHour }) => keyOf(slotDate, slotHour)).join(",")
+)
+watch(submittedKey, (key) => {
+  if (!key) return
+  initSelection()
+  selectedDate.value = props.submittedSlots[0].slotDate
+})
 const isSelected = (date, hour) => selection.has(keyOf(date, hour))
 const isSelectedOnCurrent = (hour) => isSelected(selectedDate.value, hour)
 
@@ -141,11 +152,14 @@ const hasSelection = (dateStr) => {
 
 <template>
   <div class="calendar-card">
-    <div class="text-subtitle-1 mb-1 font-weight-bold">
+    <div class="calendar-title">
       面接可能な時間帯を選択
     </div>
-    <div class="text-caption text-medium-emphasis mb-4">
+    <div class="calendar-range mb-3">
       対象期間: {{ rangeStart }} 〜 {{ rangeEnd }}
+    </div>
+    <div v-if="readonly" class="calendar-locked mb-3">
+      送信済みの希望日時です（変更できません）
     </div>
 
     <!-- Calendar View -->
@@ -186,7 +200,7 @@ const hasSelection = (dateStr) => {
     <!-- Time slots for selected day -->
     <div v-if="selectedDate" class="time-selection-area">
       <div class="d-flex align-center justify-space-between mb-3">
-        <div class="text-subtitle-2 font-weight-bold">
+        <div class="time-title">
           {{ selectedDate }} の時間帯
         </div>
         <v-checkbox
@@ -208,9 +222,8 @@ const hasSelection = (dateStr) => {
           type="button"
           :variant="isSelectedOnCurrent(hour) ? 'flat' : 'outlined'"
           :color="isSelectedOnCurrent(hour) ? 'primary' : 'grey-darken-1'"
-          class="hour-btn"
+          :class="['hour-btn', { 'hour-btn--locked': readonly }]"
           size="small"
-          :disabled="readonly"
           @click="toggleHour(hour)"
         >
           {{ hour }}:00
@@ -224,11 +237,12 @@ const hasSelection = (dateStr) => {
     <v-divider class="my-4" v-if="!readonly" />
 
     <div v-if="!readonly" class="d-flex align-center justify-space-between">
-      <div class="text-caption">
+      <div class="selection-count">
         選択中の候補: <strong>{{ selection.size }}</strong> 件
       </div>
       <v-btn
         color="primary"
+        class="text-none font-weight-bold"
         :disabled="!canSubmit"
         @click="confirmAndSubmit"
       >
@@ -245,14 +259,15 @@ const hasSelection = (dateStr) => {
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-  max-width: 360px;
+  gap: 5px;
+  max-width: 330px;
   margin: 0 auto;
 }
 .day-header {
   text-align: center;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 700;
+  color: #69758b;
   padding: 4px 0;
 }
 .calendar-cell {
@@ -260,8 +275,9 @@ const hasSelection = (dateStr) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 17px;
-  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 650;
+  border-radius: 7px;
   border: 1px solid transparent;
 }
 .date-cell {
@@ -280,16 +296,17 @@ const hasSelection = (dateStr) => {
   border-color: #d1d5db;
 }
 .date-cell.has-selection {
-  background: #dbeafe;
-  border-color: #bfdbfe;
-  color: #1e40af;
-  font-weight: bold;
+  background: #edf3ff;
+  border-color: #b9d1ff;
+  color: #1c3a6e;
+  font-weight: 800;
 }
 .date-cell.selected-date {
   background: #1769ff;
   border-color: #1769ff;
-  color: white;
-  font-weight: bold;
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgb(23 105 255 / 25%);
 }
 .hour-grid {
   display: flex;
@@ -297,10 +314,49 @@ const hasSelection = (dateStr) => {
   gap: 8px;
 }
 .hour-btn {
-  min-width: 72px;
+  min-width: 78px;
+}
+/* readonly 時は色を保ったまま操作だけを止める */
+.hour-btn--locked {
+  pointer-events: none;
 }
 .pick-date-hint {
+  padding: 10px 0;
+  color: #8994a6;
   text-align: center;
-  padding: 8px 0;
+}
+.calendar-title {
+  color: #1a2235;
+  font-size: 14px;
+  font-weight: 750;
+}
+.calendar-range {
+  color: #69758b;
+  font-size: 12px;
+}
+.calendar-locked {
+  border: 1px solid #d6e3fb;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #f4f8ff;
+  color: #1c3a6e;
+  font-size: 11px;
+  font-weight: 700;
+}
+.month-title {
+  color: #42506a;
+  font-size: 13px;
+}
+.time-title {
+  color: #1a2235;
+  font-size: 13px;
+  font-weight: 750;
+}
+.selection-count {
+  color: #69758b;
+  font-size: 12px;
+}
+.selection-count strong {
+  color: #1769ff;
 }
 </style>
