@@ -148,6 +148,13 @@ const cellTitle = (date, hour) => {
 
 // 塗るモード。ドラッグでも単クリックでも、選択したセルをこの状態にする
 const paintMode = ref("available")
+// ボタンの見た目（記号・色）はカレンダーのセルと揃えて、どれを塗るのか一目で分かるようにする
+const paintModes = [
+  { value: "available", mark: "○", label: "空き", hint: "面接できる時間帯" },
+  { value: "unavailable", mark: "×", label: "不可", hint: "面接できない時間帯" },
+  { value: "clear", mark: "−", label: "取消", hint: "登録を取り消して未登録に戻す" },
+]
+const activeMode = computed(() => paintModes.find((m) => m.value === paintMode.value) ?? paintModes[0])
 const paintValue = computed(() => {
   if (paintMode.value === "available") return true
   if (paintMode.value === "unavailable") return false
@@ -256,11 +263,24 @@ onBeforeRouteLeave(() => {
     </header>
 
     <div class="edit-bar">
-      <v-btn-toggle v-model="paintMode" density="compact" color="primary" mandatory variant="outlined">
-        <v-btn value="available" size="small">○ 空き</v-btn>
-        <v-btn value="unavailable" size="small">× 不可</v-btn>
-        <v-btn value="clear" size="small">− 取消</v-btn>
-      </v-btn-toggle>
+      <div class="paint-picker">
+        <span class="paint-picker__label">入力する内容</span>
+        <div class="paint-modes" role="radiogroup" aria-label="入力する内容">
+          <button
+            v-for="mode in paintModes"
+            :key="mode.value"
+            type="button"
+            role="radio"
+            :aria-checked="paintMode === mode.value"
+            :title="mode.hint"
+            :class="['paint-mode', `paint-mode--${mode.value}`, { 'is-active': paintMode === mode.value }]"
+            @click="paintMode = mode.value"
+          >
+            <span class="paint-mode__mark">{{ mode.mark }}</span>
+            <span class="paint-mode__text">{{ mode.label }}</span>
+          </button>
+        </div>
+      </div>
 
       <div class="edit-bar__spacer"></div>
 
@@ -284,6 +304,9 @@ onBeforeRouteLeave(() => {
     </p>
 
     <p class="hint">
+      いま選んでいるのは
+      <strong :class="`hint__mode hint__mode--${activeMode.value}`">{{ activeMode.mark }} {{ activeMode.label }}</strong>
+      です。この状態でセルをクリックすると「{{ activeMode.hint }}」として入力されます。<br />
       セルをドラッグすると範囲をまとめて選べます。日付・時刻の見出しをクリックすると、その列・行をまとめて選べます。
       <strong>変更は「保存する」を押すまで反映されません</strong>（点線の枠が未保存の変更です）。
     </p>
@@ -349,6 +372,67 @@ onBeforeRouteLeave(() => {
   margin-bottom: 10px;
 }
 .edit-bar__spacer { flex: 1; }
+
+/* 塗るモードの選択は、この画面で最初に触る操作なのではっきり見せる */
+.paint-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #dbe2ee;
+  border-radius: 14px;
+  background: #fff;
+  padding: 9px 14px;
+  box-shadow: 0 1px 3px rgba(26, 34, 53, .08);
+}
+.paint-picker__label {
+  color: #42506a;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.paint-modes { display: flex; gap: 8px; }
+.paint-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 104px;
+  min-height: 42px;
+  border: 2px solid var(--pm-line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 16px;
+  color: var(--pm-line);
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s, color .15s, box-shadow .15s, transform .1s;
+}
+.paint-mode__mark { font-size: 17px; font-weight: 800; }
+.paint-mode:hover { background: var(--pm-tint); }
+.paint-mode:active { transform: translateY(1px); }
+.paint-mode:focus-visible { outline: 3px solid rgba(23, 105, 255, .45); outline-offset: 2px; }
+.paint-mode.is-active {
+  background: var(--pm-line);
+  box-shadow: 0 0 0 3px var(--pm-ring), 0 2px 8px rgba(26, 34, 53, .2);
+  color: #fff;
+}
+.paint-mode.is-active:hover { background: var(--pm-line); }
+.paint-mode--available { --pm-line: #13894d; --pm-tint: #e8f8ee; --pm-ring: rgba(19, 137, 77, .25); }
+.paint-mode--unavailable { --pm-line: #c9352a; --pm-tint: #fdecea; --pm-ring: rgba(201, 53, 42, .25); }
+.paint-mode--clear { --pm-line: #4f5c74; --pm-tint: #eef1f6; --pm-ring: rgba(79, 92, 116, .25); }
+
+.hint strong.hint__mode {
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: #fff;
+  font-size: 12px;
+}
+.hint strong.hint__mode--available { background: #13894d; }
+.hint strong.hint__mode--unavailable { background: #c9352a; }
+.hint strong.hint__mode--clear { background: #4f5c74; }
 .pending-badge {
   border-radius: 999px;
   background: #fdf1e0;
