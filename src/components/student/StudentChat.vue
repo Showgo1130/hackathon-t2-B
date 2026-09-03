@@ -116,19 +116,9 @@ const sendMessage = async () => {
 }
 
 
-const cellState = (date, hour) => (selection.has(`${date}_${hour}`) ? "selected" : "unset")
-// 単セルは選択の反転、範囲選択はまとめて選択（全て選択済みならまとめて解除）
-const onCellsSelect = ({ cells }) => {
-  const keys = cells.map(({ date, hour }) => `${date}_${hour}`)
-  const shouldDeselect = keys.every((key) => selection.has(key))
-  keys.forEach((key) => (shouldDeselect ? selection.delete(key) : selection.add(key)))
-}
-const submitCalendar = (requestId) => {
-  const slots = [...selection].map((key) => {
-    const [slotDate, hourStr] = key.split("_")
-    return { slotDate, slotHour: Number(hourStr) }
-  })
-  if (slots.length === 0) return
+// 候補日時の選択は ChatCalendarCard 側が持ち、確定分が submit で渡ってくる
+const submitCalendar = (requestId, slots) => {
+  if (!Array.isArray(slots) || slots.length === 0) return
   socket.emit("submitCalendar", { requestId, slots })
 }
 
@@ -247,27 +237,7 @@ const onKeydown = (e) => {
           </v-btn>
         </v-form>
       </div>
-
-      <div v-if="messages.length === 0" class="text-medium-emphasis">まだメッセージはありません</div>
-    </v-card>
-
-    <v-card v-if="pendingCalendarRequest" class="pa-4 mb-4">
-      <p class="mb-2">面接可能な時間帯を選んで送信してください</p>
-      <CalendarPicker
-        :range-start="pendingCalendarRequest.payload.rangeStart"
-        :range-end="pendingCalendarRequest.payload.rangeEnd"
-        :cell-state="cellState"
-        @cells-select="onCellsSelect"
-      />
-      <v-btn class="mt-3" color="primary" @click="submitCalendar(pendingCalendarRequest.payload.requestId)">
-        この内容で送信する
-      </v-btn>
-    </v-card>
-
-    <v-form @submit.prevent="sendMessage" class="d-flex ga-2">
-      <v-text-field v-model="newMessageText" placeholder="メッセージを入力" hide-details density="compact" />
-      <v-btn type="submit" color="primary">送信</v-btn>
-    </v-form>
+    </footer>
   </div>
 </template>
 
