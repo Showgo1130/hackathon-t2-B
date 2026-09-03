@@ -98,6 +98,18 @@ const handleCreateUser = async (req, res) => {
   })
 }
 
+const handleListUsers = async (req, res) => {
+  const authorization = req.headers.authorization ?? ""
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
+  const requester = token ? verifyToken(token) : null
+  if (!requester) return sendJson(res, 401, { error: "unauthorized" })
+  if (requester.role !== "hr") return sendJson(res, 403, { error: "forbidden" })
+
+  const [students, interviewers, hrStaff] = await Promise.all([studentsRepo.list(), interviewersRepo.list(), hrStaffRepo.list()])
+  const addRole = (items, role) => items.map((item) => ({ id: item.id, name: item.name, email: item.email, createdAt: item.created_at, role }))
+  sendJson(res, 200, { users: [...addRole(students, "student"), ...addRole(interviewers, "interviewer"), ...addRole(hrStaff, "hr")] })
+}
+
 const attachApiRoutes = (server) => {
   server.middlewares.use((req, res, next) => {
     if (req.method === "POST" && req.url === "/api/login") {
@@ -109,6 +121,13 @@ const attachApiRoutes = (server) => {
     }
     if (req.method === "POST" && req.url === "/api/users") {
       handleCreateUser(req, res).catch((err) => {
+        console.error("[api/users] error", err)
+        sendJson(res, 500, { error: "internal_error" })
+      })
+      return
+    }
+    if (req.method === "GET" && req.url === "/api/users") {
+      handleListUsers(req, res).catch((err) => {
         console.error("[api/users] error", err)
         sendJson(res, 500, { error: "internal_error" })
       })

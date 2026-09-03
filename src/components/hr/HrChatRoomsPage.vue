@@ -1,38 +1,57 @@
 <script setup>
-import { computed, ref } from "vue"
+import { computed, onMounted, onUnmounted, ref } from "vue"
+import { session } from "../../session.js"
+import socketManager from "../../socketManager.js"
 import HrIcon from "./ui/HrIcon.vue"
-import { hrChatRooms } from "./hrChatMockData.js"
 
 const search = ref("")
 const activeRole = ref("all")
+const students = ref([])
+const interviewers = ref([])
+const requests = ref([])
+const loading = ref(true)
+const getSocket = () => { try { return socketManager.getInstance() } catch { return socketManager.connect(session.value.token) } }
+const socket = getSocket()
 
 const roleOptions = [
   { value: "all", label: "すべて", icon: "chat" },
   { value: "student", label: "学生", icon: "student" },
   { value: "interviewer", label: "面接官", icon: "briefcase" },
-  { value: "hr", label: "他人事", icon: "shield" },
 ]
 
 const roleMeta = {
   student: { label: "学生", description: "選考中の候補者", icon: "student" },
   interviewer: { label: "面接官", description: "面接を担当するメンバー", icon: "briefcase" },
-  hr: { label: "他人事", description: "採用チームのメンバー", icon: "shield" },
 }
+
+const selectionLabels = { first_interview: "一次面接", second_interview: "二次面接", final_interview: "最終面接", offered: "内定", rejected: "不採用" }
+const requestLabels = { awaiting_student: "学生回答待ち", matching: "面接官確認中", confirmed: "日程確定", cancelled: "キャンセル" }
+const latestRequest = (studentId) => requests.value.filter((item) => item.student_id === studentId).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0]
+const hrChatRooms = computed(() => [
+  ...students.value.map((student) => {
+    const request = latestRequest(student.id)
+    return { id: student.id, role: "student", name: student.name, detail: student.email, roleLabel: "学生", status: selectionLabels[student.selection_status] ?? student.selection_status, lastMessage: request ? requestLabels[request.status] ?? request.status : "日程調整は未送信です", time: request ? new Date(request.updated_at).toLocaleDateString("ja-JP") : "", unread: 0 }
+  }),
+  ...interviewers.value.map((item) => ({ id: item.id, role: "interviewer", name: item.name, detail: item.email, roleLabel: "面接官", status: "面接官", lastMessage: "トークルームを開く", time: "", unread: 0 })),
+])
 
 const filteredRooms = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return hrChatRooms.filter((room) => {
+  return hrChatRooms.value.filter((room) => {
     const matchesRole = activeRole.value === "all" || room.role === activeRole.value
     const matchesQuery = !query || [room.name, room.detail, room.lastMessage].some((value) => value.toLowerCase().includes(query))
     return matchesRole && matchesQuery
   })
 })
 
-const roomGroups = computed(() => ["student", "interviewer", "hr"]
+const roomGroups = computed(() => ["student", "interviewer"]
   .map((role) => ({ role, ...roleMeta[role], rooms: filteredRooms.value.filter((room) => room.role === role) }))
   .filter((group) => group.rooms.length))
 
-const roleCount = (role) => role === "all" ? hrChatRooms.length : hrChatRooms.filter((room) => room.role === role).length
+const roleCount = (role) => role === "all" ? hrChatRooms.value.length : hrChatRooms.value.filter((room) => room.role === role).length
+const onDashboard = (data) => { students.value = data.students ?? []; interviewers.value = data.interviewers ?? []; requests.value = data.requests ?? []; loading.value = false }
+onMounted(() => { socket.on("dashboardData", onDashboard); socket.emit("loadDashboard") })
+onUnmounted(() => socket.off("dashboardData", onDashboard))
 </script>
 
 <template>
@@ -72,7 +91,7 @@ const roleCount = (role) => role === "all" ? hrChatRooms.length : hrChatRooms.fi
       </section>
     </main>
 
-    <div v-else class="empty-state"><span><HrIcon name="search" :size="23" /></span><strong>トークルームが見つかりません</strong><p>検索条件またはユーザー種別を変更してください。</p></div>
+    <div v-else class="empty-state"><span><HrIcon :name="loading ? 'chat' : 'search'" :size="23" /></span><strong>{{ loading ? "DBから読み込んでいます" : "トークルームが見つかりません" }}</strong><p>{{ loading ? "少しお待ちください。" : "検索条件またはユーザー種別を変更してください。" }}</p></div>
   </div>
 </template>
 

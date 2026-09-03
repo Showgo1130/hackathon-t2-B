@@ -7,7 +7,8 @@ provide("session", session)
 
 onMounted(() => {
   if (session.value?.token) {
-    socketManager.connect(session.value.token)
+    try { socketManager.getInstance() }
+    catch { socketManager.connect(session.value.token) }
   }
 })
 </script>
