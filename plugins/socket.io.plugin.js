@@ -77,7 +77,8 @@ const handleCreateUser = async (req, res) => {
   const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : ""
   const password = typeof payload.password === "string" ? payload.password : ""
 
-  if (!ROLES.includes(role) || !name || !email || password.length < 8) {
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!ROLES.includes(role) || !name || !emailPattern.test(email) || password.length < 8) {
     return sendJson(res, 400, { error: "invalid_fields" })
   }
 
