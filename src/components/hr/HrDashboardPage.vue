@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import socketManager from "../../socketManager.js"
 import { session } from "../../session.js"
@@ -115,6 +115,20 @@ const scheduleStatusSummary = computed(() =>
   }))
 )
 const unsentStudents = computed(() => students.filter((s) => scheduleStatusKey(s.id) === "none"))
+const unsentSearch = ref("")
+const unsentSelectionFilter = ref("all")
+const unsentPage = ref(1)
+const unsentPageSize = 10
+const filteredUnsentStudents = computed(() => {
+  const query = unsentSearch.value.trim().toLowerCase()
+  return unsentStudents.value.filter((student) =>
+    (unsentSelectionFilter.value === "all" || student.selection_status === unsentSelectionFilter.value)
+    && (!query || student.name.toLowerCase().includes(query) || student.email.toLowerCase().includes(query)))
+})
+const unsentTotalPages = computed(() => Math.max(1, Math.ceil(filteredUnsentStudents.value.length / unsentPageSize)))
+const paginatedUnsentStudents = computed(() => filteredUnsentStudents.value.slice((unsentPage.value - 1) * unsentPageSize, unsentPage.value * unsentPageSize))
+watch([unsentSearch, unsentSelectionFilter], () => { unsentPage.value = 1 })
+watch(unsentTotalPages, (pages) => { if (unsentPage.value > pages) unsentPage.value = pages })
 
 const lastUpdatedAt = (studentId) => {
   const [latest] = requestsByStudent(studentId)
@@ -157,6 +171,24 @@ const sortedStudents = computed(() => {
     return (av - bv) * dir
   })
 })
+
+// ---- 一覧の絞り込み・ページ送り（表示のみ。DB取得方法は変更しない）----
+const dashboardSearch = ref("")
+const selectionFilter = ref("all")
+const scheduleFilter = ref("all")
+const currentPage = ref(1)
+const pageSize = 10
+const filteredStudents = computed(() => {
+  const query = dashboardSearch.value.trim().toLowerCase()
+  return sortedStudents.value.filter((student) =>
+    (selectionFilter.value === "all" || student.selection_status === selectionFilter.value)
+    && (scheduleFilter.value === "all" || scheduleStatusKey(student.id) === scheduleFilter.value)
+    && (!query || student.name.toLowerCase().includes(query) || student.email.toLowerCase().includes(query)))
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredStudents.value.length / pageSize)))
+const paginatedStudents = computed(() => filteredStudents.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize))
+watch([dashboardSearch, selectionFilter, scheduleFilter], () => { currentPage.value = 1 })
+watch(totalPages, (pages) => { if (currentPage.value > pages) currentPage.value = pages })
 
 const relativeTime = (dateStr) => {
   if (!dateStr) return "-"
@@ -286,9 +318,10 @@ const createUser = async (user) => {
           </div>
         </div>
 
-        <div class="text-subtitle-1 font-weight-medium mb-4">学生ステータス一覧</div>
+        <div class="student-list-title"><div><div class="text-subtitle-1 font-weight-medium">学生ステータス一覧</div><small>{{ filteredStudents.length }}件中 {{ paginatedStudents.length }}件を表示</small></div><div class="student-filters"><label><HrIcon name="search" :size="15" /><input v-model="dashboardSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="selectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select><select v-model="scheduleFilter"><option value="all">すべての日程状況</option><option v-for="(meta, key) in SCHEDULE_STATUS_META" :key="key" :value="key">{{ meta.label }}</option></select></div></div>
 
         <div v-if="students.length === 0" class="text-medium-emphasis pa-4">学生が登録されていません</div>
+        <div v-else-if="filteredStudents.length === 0" class="text-medium-emphasis pa-4">条件に一致する学生はいません</div>
 
         <div v-else class="dash-grid">
           <div class="dash-head">候補者名</div>
@@ -303,7 +336,7 @@ const createUser = async (user) => {
           </div>
           <div class="dash-head text-right">操作</div>
 
-          <template v-for="s in sortedStudents" :key="s.id">
+          <template v-for="s in paginatedStudents" :key="s.id">
             <div class="dash-cell">
               <div class="d-flex align-center ga-3">
                 <div class="avatar-circle" :style="{ background: avatarColor(s.name) }">{{ initials(s.name) }}</div>
@@ -339,6 +372,7 @@ const createUser = async (user) => {
             </div>
           </template>
         </div>
+        <nav v-if="filteredStudents.length > pageSize" class="pagination" aria-label="学生一覧のページ送り"><button type="button" :disabled="currentPage === 1" @click="currentPage--">‹ 前へ</button><span>{{ currentPage }} / {{ totalPages }}</span><button type="button" :disabled="currentPage === totalPages" @click="currentPage++">次へ ›</button></nav>
       </v-card>
 
       <v-card class="pa-4 unsent-panel">
@@ -346,11 +380,13 @@ const createUser = async (user) => {
           未送信の学生
           <span class="text-caption text-medium-emphasis">（{{ unsentStudents.length }}件）</span>
         </div>
+        <div class="unsent-filters"><label><HrIcon name="search" :size="14" /><input v-model="unsentSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="unsentSelectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select></div>
         <div v-if="unsentStudents.length === 0" class="text-caption text-medium-emphasis">
           未送信の学生はいません
         </div>
+        <div v-else-if="filteredUnsentStudents.length === 0" class="text-caption text-medium-emphasis">条件に一致する学生はいません</div>
         <v-list v-else density="compact" class="pa-0">
-          <v-list-item v-for="s in unsentStudents" :key="s.id" class="px-0">
+          <v-list-item v-for="s in paginatedUnsentStudents" :key="s.id" class="px-0 unsent-item">
             <div class="d-flex align-center ga-2">
               <div class="avatar-circle avatar-circle--sm" :style="{ background: avatarColor(s.name) }">
                 {{ initials(s.name) }}
@@ -365,6 +401,7 @@ const createUser = async (user) => {
             </div>
           </v-list-item>
         </v-list>
+        <nav v-if="filteredUnsentStudents.length > unsentPageSize" class="pagination pagination--unsent" aria-label="未送信学生のページ送り"><button type="button" :disabled="unsentPage === 1" @click="unsentPage--">‹</button><span>{{ unsentPage }} / {{ unsentTotalPages }}</span><button type="button" :disabled="unsentPage === unsentTotalPages" @click="unsentPage++">›</button></nav>
       </v-card>
     </div>
 
@@ -452,12 +489,24 @@ const createUser = async (user) => {
 
 .summary-grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
 }
-.summary-card { border: 1px solid #e4e9f1; border-radius: 10px; padding: 12px; }
-.summary-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 8px; font-size: 15px; }
-.summary-count { font-size: 22px; font-weight: 700; }
+.summary-grid.mb-6 { margin-bottom: 16px !important; }
+.summary-card { min-height: 78px; border: 1px solid #e4e9f1; border-radius: 9px; padding: 9px 10px; }
+.summary-icon { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 7px; font-size: 12px; }
+.summary-count { font-size: 18px; font-weight: 700; line-height: 1; }
+.summary-card > .font-weight-medium { margin-top: 6px !important; font-size: 12px; line-height: 1.25; }
+.summary-card > .text-caption { margin-top: 2px; font-size: 9px !important; line-height: 1.3; }
+.student-list-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+.student-list-title small { color: #8490a3; font-size: 10px; }
+.student-filters { display: flex; gap: 7px; }
+.student-filters label { display: flex; width: 190px; height: 34px; align-items: center; gap: 6px; border: 1px solid #dce3ed; border-radius: 8px; padding: 0 9px; color: #8490a3; }
+.student-filters input { min-width: 0; flex: 1; border: 0; outline: 0; font: inherit; font-size: 10px; }
+.student-filters select { height: 34px; border: 1px solid #dce3ed; border-radius: 8px; padding: 0 8px; background: #fff; color: #536077; font-size: 10px; }
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 14px; }
+.pagination button { height: 32px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 12px; background: #fff; color: #43516a; font-size: 10px; cursor: pointer; }
+.pagination button:disabled { opacity: .42; cursor: default; }.pagination span { color: #758197; font-size: 10px; }
 
 .dash-grid {
   display: grid;
@@ -474,21 +523,22 @@ const createUser = async (user) => {
 .dash-head--sortable { cursor: pointer; user-select: none; }
 .dash-head--sortable:hover { color: #1769ff; }
 .sort-arrow { font-size: 10px; }
-.dash-cell { display: flex; min-width: 0; align-items: center; border-bottom: 1px solid #f0f3f8; padding: 12px 8px; }
+.dash-cell { display: flex; min-width: 0; min-height: 48px; align-items: center; border-bottom: 1px solid #f0f3f8; padding: 7px 8px; font-size: 12px; }
 .dash-cell--column { flex-direction: column; align-items: flex-start; }
 .status-chip { border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 650; }
 .avatar-circle {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 29px;
+  height: 29px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
   color: #fff;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
 }
 .avatar-circle--sm { width: 26px; height: 26px; font-size: 11px; }
+.unsent-filters { display: grid; gap: 6px; margin-bottom: 12px; }.unsent-filters label { display: flex; height: 31px; align-items: center; gap: 6px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 8px; color: #8490a3; }.unsent-filters input { min-width: 0; flex: 1; border: 0; outline: 0; font: inherit; font-size: 9px; }.unsent-filters select { height: 31px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 7px; background: #fff; color: #536077; font-size: 9px; }.unsent-item { min-height: 42px!important; }.pagination--unsent { justify-content: center; padding-top: 9px; }.pagination--unsent button { width: 30px; padding: 0; }
 
 .toast {
   position: fixed;
@@ -509,6 +559,7 @@ const createUser = async (user) => {
 }
 @media (max-width: 820px) {
   .dashboard-page { padding: 22px 18px 34px; }
+  .student-list-title { align-items: stretch; flex-direction: column; }.student-filters { flex-wrap: wrap; }.student-filters label { width: 100%; }.student-filters select { flex: 1; }
   .dash-grid { grid-template-columns: minmax(140px, 2fr) 90px minmax(140px, 1.4fr) 90px 90px; overflow-x: auto; }
 }
 </style>
