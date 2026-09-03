@@ -36,16 +36,20 @@ const onNewMessage = (message) => {
 const now = ref(new Date())
 let clockTimer = null
 
+const loadSchedules = () => socket.emit("loadSchedules")
+
 onMounted(() => {
   socket.on("scheduleData", onScheduleData)
   socket.on("newMessage", onNewMessage)
-  socket.emit("loadSchedules")
+  socket.on("connect", loadSchedules)
+  loadSchedules()
   // 開催時刻を過ぎた予定を「過去の予定」へ移すため、現在時刻を定期更新する
   clockTimer = setInterval(() => (now.value = new Date()), 60 * 1000)
 })
 onUnmounted(() => {
   socket.off("scheduleData", onScheduleData)
   socket.off("newMessage", onNewMessage)
+  socket.off("connect", loadSchedules)
   clearInterval(clockTimer)
 })
 

@@ -34,6 +34,11 @@ const clearCells = (cells) => {
 const loadAvailability = () => {
   socket.emit("loadAvailability", { rangeStart: rangeStart.value, rangeEnd: rangeEnd.value })
 }
+// 再接続したときも取り直す
+const reload = () => {
+  loadAvailability()
+  socket.emit("loadSchedules")
+}
 
 // 確定した面接。空き予定の上に「面接あり」として重ねて表示する（編集はさせない）
 const bookedMap = reactive(new Map())
@@ -67,8 +72,8 @@ onMounted(() => {
   socket.on("availabilityCleared", onAvailabilityCleared)
   socket.on("scheduleData", onScheduleData)
   socket.on("appError", onAppError)
-  loadAvailability()
-  socket.emit("loadSchedules")
+  socket.on("connect", reload)
+  reload()
 })
 onUnmounted(() => {
   socket.off("availabilityData", onAvailabilityData)
@@ -76,6 +81,7 @@ onUnmounted(() => {
   socket.off("availabilityCleared", onAvailabilityCleared)
   socket.off("scheduleData", onScheduleData)
   socket.off("appError", onAppError)
+  socket.off("connect", reload)
   window.clearTimeout(saveTimer)
 })
 
