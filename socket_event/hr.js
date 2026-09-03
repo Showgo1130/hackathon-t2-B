@@ -31,9 +31,16 @@ export default async (io, socket) => {
 
   // 選考状況（1次／2次／最終／内定／不採用）の更新
   socket.on("updateSelectionStatus", async ({ studentId, status }) => {
-    if (!studentId || !SELECTION_STATUSES.includes(status)) return
-    await studentsRepo.updateSelectionStatus(studentId, status)
-    await sendDashboard()
+    const isUuid =
+      typeof studentId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(studentId)
+    if (!isUuid || !SELECTION_STATUSES.includes(status)) return
+    try {
+      await studentsRepo.updateSelectionStatus(studentId, status)
+      await sendDashboard()
+    } catch (err) {
+      console.error("updateSelectionStatus failed", err)
+    }
   })
 
   socket.on("openConversation", async ({ conversationId }) => {
