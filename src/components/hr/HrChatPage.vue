@@ -84,7 +84,7 @@ const sendText = async () => {
       </div>
     </header>
 
-    <section ref="chatBody" class="chat-body" aria-label="田中太郎さんとのチャット">
+    <section ref="chatBody" class="chat-body" :aria-label="`${selectedRoom.name}さんとのチャット`">
       <div class="date-divider"><span>{{ formattedToday }}</span></div>
 
       <div class="message-row message-row--mine" :class="{ 'message-row--schedule': scheduleSent }">
