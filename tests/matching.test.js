@@ -168,7 +168,7 @@ describe("④ 承認と確定", () => {
     return context
   }
 
-  it("必要1名なら1人の承認で確定し、学生と面接官全員に確定通知が届く", async () => {
+  it("必要1名なら1人の承認で確定し、学生と承認した面接官に確定通知が届く", async () => {
     const io = makeIo()
     const { request, interviewers, studentConversation } = await reachApproval(io, {
       interviewerCount: 3,
@@ -192,10 +192,11 @@ describe("④ 承認と確定", () => {
     assert.equal(studentNotice.payload.confirmedDate, SLOT_A.slotDate)
     assert.equal(studentNotice.payload.round, 1)
 
-    for (const interviewer of interviewers) {
-      const notices = messagesFor(io, conversationOf(interviewer.id)).filter((m) => m.payload?.confirmedDate)
-      assert.equal(notices.length, 1, `${interviewer.name} にも確定通知が届く`)
-    }
+    const noticesFor = (interviewer) =>
+      messagesFor(io, conversationOf(interviewer.id)).filter((m) => m.payload?.confirmedDate)
+    assert.equal(noticesFor(interviewers[0]).length, 1, "承認した面接官には確定通知が届く")
+    assert.equal(noticesFor(interviewers[1]).length, 0, "承認していない面接官には送らない")
+    assert.deepEqual(stored.interviewer_ids, [interviewers[0].id])
   })
 
   it("必要2名なら、2人目の承認が揃うまで確定しない", async () => {
@@ -356,19 +357,27 @@ describe("④' 見送り", () => {
     )
   })
 
-  it("確定したら、未回答の面接官に残った承認依頼を取り消す", async () => {
+  it("確定したら、未回答のまま残った承認依頼を取り消す", async () => {
+    // 3人とも空き登録済みなので、必要2名でも3人に承認依頼が飛ぶ
+    const { request, interviewers } = await setupRequest({ interviewerCount: 3, requiredInterviewerCount: 2 })
+    interviewers.forEach((i) => setAvailability(i.id, SLOT_A.slotDate, SLOT_A.slotHour, true))
     const io = makeIo()
-    const { request, interviewers } = await reachApproval(io, {
-      interviewerCount: 3, requiredInterviewerCount: 1, availableCount: 3, slots: [SLOT_A],
-    })
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    assert.equal(io.messages().filter((m) => m.payload?.kind === "match_approval").length, 3)
+    io.emitted.length = 0
 
     await matching.respondToMatchApproval(io, {
       interviewerId: interviewers[0].id, requestId: request.id, ...SLOT_A, approved: true,
     })
+    await matching.respondToMatchApproval(io, {
+      interviewerId: interviewers[1].id, requestId: request.id, ...SLOT_A, approved: true,
+    })
 
+    assert.equal((await reload(request.id)).status, "confirmed")
     const cancelled = messagesFor(io, conversationOf(interviewers[2].id))
       .some((m) => m.payload?.kind === "match_approval_cancelled")
     assert.ok(cancelled, "確定後も承認依頼が未対応のまま残ると、通知バッジが消えない")
+    assert.deepEqual((await reload(request.id)).interviewer_ids, [interviewers[0].id, interviewers[1].id])
   })
 })
 

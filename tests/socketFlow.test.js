@@ -218,7 +218,7 @@ describe("面接官の空き回答", () => {
       requestId: context.request.id,
       slots: [{ slotDate: "2026-09-10", slotHour: 14 }],
     })
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await wait()
     received.length = 0
     return { ...context, socket, received }
   }
@@ -232,42 +232,26 @@ describe("面接官の空き回答", () => {
       isAvailable: true,
       requestId: db.interview_requests[0].id,
     })
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await wait()
 
     assert.ok(received.some((m) => m.msg_type === "availability_answer" && m.payload.isAvailable === true))
     assert.ok(received.some((m) => m.payload?.kind === "match_approval"))
     assert.equal(db.availability[0].is_available, true)
   })
 
-  it("チャットに「はい」と書くだけでも空き確認への回答になる", async () => {
-    const { socket, received } = await prepareCheck()
+  // 本文の言い回しで可否を推測すると取り違えるため、チャットは回答として扱わない
+  for (const body of ["はい、大丈夫です", "その日は無理です", "空いていません", "承知しました、確認します"]) {
+    it(`チャットの「${body}」は回答として扱わない`, async () => {
+      const { socket, received } = await prepareCheck()
 
-    socket.emit("sendMessage", { body: "はい、大丈夫です" })
-    await new Promise((resolve) => setTimeout(resolve, 200))
+      socket.emit("sendMessage", { body })
+      await wait()
 
-    assert.ok(received.some((m) => m.msg_type === "text"))
-    assert.ok(received.some((m) => m.msg_type === "availability_answer" && m.payload.isAvailable === true))
-  })
-
-  it("チャットに「無理です」と書くと不可として扱われる", async () => {
-    const { socket, received } = await prepareCheck()
-
-    socket.emit("sendMessage", { body: "その日は無理です" })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-
-    const answer = received.find((m) => m.msg_type === "availability_answer")
-    assert.equal(answer.payload.isAvailable, false)
-    assert.equal(db.availability[0].is_available, false)
-  })
-
-  it("空き確認と関係ない雑談は回答として扱わない", async () => {
-    const { socket, received } = await prepareCheck()
-
-    socket.emit("sendMessage", { body: "承知しました、確認します" })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-
-    assert.equal(received.filter((m) => m.msg_type === "availability_answer").length, 0)
-  })
+      assert.ok(received.some((m) => m.msg_type === "text" && m.body === body), "本文はそのまま投稿される")
+      assert.equal(received.filter((m) => m.msg_type === "availability_answer").length, 0)
+      assert.equal(db.availability.length, 0, "空き予定も書き換わらない")
+    })
+  }
 })
 
 describe("人事：複数の学生へまとめて日程調整を送る", () => {
