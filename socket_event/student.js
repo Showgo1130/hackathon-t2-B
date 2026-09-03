@@ -1,6 +1,7 @@
 import { conversationsRepo } from "../server/repositories/conversations.js"
 import { messagesRepo } from "../server/repositories/messages.js"
 import { interviewRequestsRepo } from "../server/repositories/interviewRequests.js"
+import { studentsRepo } from "../server/repositories/students.js"
 import { submitStudentSlots } from "../server/matching.js"
 
 const roomOf = (conversationId) => `conv:${conversationId}`
@@ -11,8 +12,15 @@ export default async (io, socket) => {
   const conversation = await conversationsRepo.findOrCreateForStudent(studentId, null)
   socket.join(roomOf(conversation.id))
 
-  const history = await messagesRepo.listForConversation(conversation.id)
-  socket.emit("init", { conversationId: conversation.id, messages: history })
+  const [history, student] = await Promise.all([
+    messagesRepo.listForConversation(conversation.id),
+    studentsRepo.findById(studentId),
+  ])
+  socket.emit("init", {
+    conversationId: conversation.id,
+    messages: history,
+    selectionStatus: student?.selection_status ?? null,
+  })
 
   socket.on("sendMessage", async ({ body }) => {
     if (!body || !body.trim()) return

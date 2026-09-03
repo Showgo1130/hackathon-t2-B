@@ -4,11 +4,14 @@
 create extension if not exists pgcrypto;
 
 -- 学生・面接官・人事は別テーブル
+-- selection_status: 学生の選考状況。チャット画面上部に表示する
+-- 想定コード値: document_screening / first_interview / second_interview / final_interview / offer / rejected
 create table if not exists students (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   email text unique not null,
   password_hash text not null,
+  selection_status text not null default 'first_interview',
   created_at timestamptz default now()
 );
 

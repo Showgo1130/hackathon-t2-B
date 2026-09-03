@@ -20,10 +20,21 @@ export const makeAccountRepo = (table) => ({
     return data
   },
 
-  async create({ name, email, passwordHash }) {
+  async create({ name, email, passwordHash, ...extraFields }) {
     const { data, error } = await supabase
       .from(table)
-      .insert({ name, email, password_hash: passwordHash })
+      .insert({ name, email, password_hash: passwordHash, ...extraFields })
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  },
+
+  async updateById(id, fields) {
+    const { data, error } = await supabase
+      .from(table)
+      .update(fields)
+      .eq("id", id)
       .select()
       .single()
     if (error) throw error
