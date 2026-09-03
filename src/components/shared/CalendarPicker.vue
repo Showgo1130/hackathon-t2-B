@@ -7,6 +7,9 @@ const props = defineProps({
   hours: { type: Array, default: () => [9, 10, 11, 12, 13, 14, 15, 16, 17] },
   cellState: { type: Function, required: true }, // (date, hour) => string (css state name)
   cellLabel: { type: Function, default: (date, hour) => `${hour}:00` },
+  // 編集できないセル（確定した面接など）。選択に含めず、ドラッグの起点にもしない
+  cellLocked: { type: Function, default: () => false },
+  cellTitle: { type: Function, default: () => "" },
 })
 
 // cells は [{ date, hour }] の配列。単セルのクリックも要素1件の選択として通知する
@@ -51,6 +54,9 @@ const inDragRect = (dateIdx, hourIdx) => {
   return dateIdx >= r.dateMin && dateIdx <= r.dateMax && hourIdx >= r.hourMin && hourIdx <= r.hourMax
 }
 
+// ロック済みのセルは選択から除く（範囲ドラッグに含まれても、その枠だけ飛ばす）
+const selectable = (cells) => cells.filter(({ date, hour }) => !props.cellLocked(date, hour))
+
 const rectCells = () => {
   const r = dragRect.value
   if (!r) return []
@@ -60,7 +66,7 @@ const rectCells = () => {
       cells.push({ date: dates.value[d], hour: props.hours[h] })
     }
   }
-  return cells
+  return selectable(cells)
 }
 
 const endDrag = () => {
@@ -73,11 +79,13 @@ const endDrag = () => {
 
 // キーボード操作（Enter / Space）では単セルの選択として通知する
 const selectCell = (dateIdx, hourIdx) => {
-  emit("cellsSelect", { cells: [{ date: dates.value[dateIdx], hour: props.hours[hourIdx] }] })
+  const cells = selectable([{ date: dates.value[dateIdx], hour: props.hours[hourIdx] }])
+  if (cells.length > 0) emit("cellsSelect", { cells })
 }
 
 const startDrag = (dateIdx, hourIdx, event) => {
   event.preventDefault() // ドラッグ中のテキスト選択を抑止する
+  if (props.cellLocked(dates.value[dateIdx], props.hours[hourIdx])) return
   dragAnchor.value = { dateIdx, hourIdx }
   dragCursor.value = { dateIdx, hourIdx }
   window.addEventListener("mouseup", endDrag)
@@ -91,10 +99,13 @@ const extendDrag = (dateIdx, hourIdx) => {
 onUnmounted(() => window.removeEventListener("mouseup", endDrag))
 
 // ---- ヘッダークリックによる行／列の一括選択 ----
-const selectDate = (date) => emit("cellsSelect", { cells: props.hours.map((hour) => ({ date, hour })) })
-const selectHour = (hour) => emit("cellsSelect", { cells: dates.value.map((date) => ({ date, hour })) })
-const selectAll = () =>
-  emit("cellsSelect", { cells: dates.value.flatMap((date) => props.hours.map((hour) => ({ date, hour }))) })
+const emitSelection = (cells) => {
+  const target = selectable(cells)
+  if (target.length > 0) emit("cellsSelect", { cells: target })
+}
+const selectDate = (date) => emitSelection(props.hours.map((hour) => ({ date, hour })))
+const selectHour = (hour) => emitSelection(dates.value.map((date) => ({ date, hour })))
+const selectAll = () => emitSelection(dates.value.flatMap((date) => props.hours.map((hour) => ({ date, hour }))))
 </script>
 
 <template>
@@ -121,7 +132,9 @@ const selectAll = () =>
             <button
               type="button"
               class="cell"
-              :class="[cellState(date, hour), { dragging: inDragRect(dateIdx, hourIdx) }]"
+              :class="[cellState(date, hour), { dragging: inDragRect(dateIdx, hourIdx), locked: cellLocked(date, hour) }]"
+              :title="cellTitle(date, hour)"
+              :aria-disabled="cellLocked(date, hour)"
               @mousedown="startDrag(dateIdx, hourIdx, $event)"
               @mouseenter="extendDrag(dateIdx, hourIdx)"
               @keydown.enter.prevent="selectCell(dateIdx, hourIdx)"
@@ -191,6 +204,17 @@ th, td {
   outline: 2px solid #34495e;
   outline-offset: -2px;
 }
+/* 確定した面接など、編集できないセル */
+.cell.locked {
+  cursor: not-allowed;
+}
+.cell.booked {
+  border-color: #1769ff;
+  background: #1769ff;
+  color: #fff;
+  font-weight: 700;
+}
+
 /* 未保存の変更（cellState に unsaved を含めると点線で示される） */
 .cell.unsaved {
   border-style: dashed;
