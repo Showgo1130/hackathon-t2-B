@@ -36,16 +36,20 @@ const onNewMessage = (message) => {
 const now = ref(new Date())
 let clockTimer = null
 
+const loadSchedules = () => socket.emit("loadSchedules")
+
 onMounted(() => {
   socket.on("scheduleData", onScheduleData)
   socket.on("newMessage", onNewMessage)
-  socket.emit("loadSchedules")
+  socket.on("connect", loadSchedules)
+  loadSchedules()
   // 開催時刻を過ぎた予定を「過去の予定」へ移すため、現在時刻を定期更新する
   clockTimer = setInterval(() => (now.value = new Date()), 60 * 1000)
 })
 onUnmounted(() => {
   socket.off("scheduleData", onScheduleData)
   socket.off("newMessage", onNewMessage)
+  socket.off("connect", loadSchedules)
   clearInterval(clockTimer)
 })
 
@@ -131,7 +135,12 @@ const copyZoomUrl = async () => {
       :key="item.id"
       class="mb-3 schedule-card"
       variant="outlined"
+      role="button"
+      tabindex="0"
+      :aria-label="`${item.studentName} ${roundLabel(item.round)} ${formatRange(item)} の詳細を開く`"
       @click="openDetail(item)"
+      @keydown.enter.prevent="openDetail(item)"
+      @keydown.space.prevent="openDetail(item)"
     >
       <div class="d-flex align-center pa-4 ga-4">
         <v-avatar color="primary" size="44">
@@ -241,9 +250,14 @@ const copyZoomUrl = async () => {
   cursor: pointer;
   transition: box-shadow .15s ease, border-color .15s ease;
 }
-.schedule-card:hover {
+.schedule-card:hover,
+.schedule-card:focus-visible {
   border-color: #b9d2ff;
   box-shadow: 0 2px 10px rgb(23 105 255 / 12%);
+}
+.schedule-card:focus-visible {
+  outline: 2px solid #1769ff;
+  outline-offset: 2px;
 }
 
 .detail-row {

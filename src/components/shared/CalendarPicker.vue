@@ -208,6 +208,9 @@ th, td {
 .cell.locked {
   cursor: not-allowed;
 }
+.cell.past {
+  opacity: .45;
+}
 .cell.booked {
   border-color: #1769ff;
   background: #1769ff;

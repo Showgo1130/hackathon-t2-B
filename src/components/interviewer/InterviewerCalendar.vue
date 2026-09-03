@@ -34,6 +34,11 @@ const clearCells = (cells) => {
 const loadAvailability = () => {
   socket.emit("loadAvailability", { rangeStart: rangeStart.value, rangeEnd: rangeEnd.value })
 }
+// 再接続したときも取り直す
+const reload = () => {
+  loadAvailability()
+  socket.emit("loadSchedules")
+}
 
 // 確定した面接。空き予定の上に「面接あり」として重ねて表示する（編集はさせない）
 const bookedMap = reactive(new Map())
@@ -44,26 +49,47 @@ const onScheduleData = (rows) => {
   })
 }
 const isBooked = (date, hour) => bookedMap.has(keyOf(date, hour))
+
+// 過ぎた枠に空き予定を登録しても意味がないので編集させない
+const isPastSlot = (date, hour) => new Date(`${date}T${String(hour).padStart(2, "0")}:00:00`) < new Date()
+const isLocked = (date, hour) => isBooked(date, hour) || isPastSlot(date, hour)
 const bookedCount = computed(() => bookedMap.size)
 
 const onAvailabilityData = (rows) => applyRows(rows)
-const onAvailabilityUpdated = (rows) => applyRows(rows)
-const onAvailabilityCleared = (cells) => clearCells(cells)
+const onAvailabilityUpdated = (rows) => {
+  applyRows(rows)
+  countResponse()
+}
+const onAvailabilityCleared = (cells) => {
+  clearCells(cells)
+  countResponse()
+}
+const onAppError = ({ message }) => failSave(message ?? "保存に失敗しました")
 
 onMounted(() => {
   socket.on("availabilityData", onAvailabilityData)
   socket.on("availabilityUpdated", onAvailabilityUpdated)
   socket.on("availabilityCleared", onAvailabilityCleared)
   socket.on("scheduleData", onScheduleData)
-  loadAvailability()
-  socket.emit("loadSchedules")
+  socket.on("appError", onAppError)
+  socket.on("connect", reload)
+  reload()
 })
 onUnmounted(() => {
   socket.off("availabilityData", onAvailabilityData)
   socket.off("availabilityUpdated", onAvailabilityUpdated)
   socket.off("availabilityCleared", onAvailabilityCleared)
   socket.off("scheduleData", onScheduleData)
+  socket.off("appError", onAppError)
+  socket.off("connect", reload)
+  window.clearTimeout(saveTimer)
 })
+
+const isCurrentWindow = computed(() => rangeStart.value === toIso(new Date()))
+const goToToday = () => {
+  windowStart.value = new Date()
+  loadAvailability()
+}
 
 const shiftWindow = (days) => {
   const d = new Date(windowStart.value)
@@ -98,6 +124,7 @@ const pendingBreakdown = computed(() => ({
 
 const cellState = (date, hour) => {
   if (isBooked(date, hour)) return "booked"
+  if (isPastSlot(date, hour)) return `${currentValue(keyOf(date, hour)) === true ? "available" : currentValue(keyOf(date, hour)) === false ? "unavailable" : "unset"} past`
   const key = keyOf(date, hour)
   const v = currentValue(key)
   const base = v === true ? "available" : v === false ? "unavailable" : "unset"
@@ -115,6 +142,7 @@ const roundLabel = (round) => (round >= 3 ? "最終面接" : `${round}次面接`
 const cellTitle = (date, hour) => {
   const booked = bookedMap.get(keyOf(date, hour))
   if (booked) return `${booked.studentName}／${roundLabel(booked.round)}（面接が確定しています）`
+  if (isPastSlot(date, hour)) return "過ぎた日時のため変更できません"
   return ""
 }
 
@@ -128,7 +156,7 @@ const paintValue = computed(() => {
 
 const onCellsSelect = ({ cells: selected }) => {
   // 確定した面接の枠は変更させない（CalendarPicker 側でも除外しているが二重に守る）
-  const cells = selected.filter(({ date, hour }) => !isBooked(date, hour))
+  const cells = selected.filter(({ date, hour }) => !isLocked(date, hour))
   if (cells.length === 0) return
 
   // 単セルを同じ状態に塗り直したときは取り消しとみなす（誤クリックを戻せるようにする）
@@ -150,36 +178,60 @@ const openConfirm = () => {
   confirmOpen.value = true
 }
 
+const savedNotice = ref(false)
+const saveError = ref("")
+
+// サーバーの応答を数えて、全部返ってきたら保存完了とする
+let awaitingResponses = 0
+let saveTimer = null
+
+const finishSave = () => {
+  awaitingResponses = 0
+  window.clearTimeout(saveTimer)
+  isSaving.value = false
+  draftMap.clear()
+  savedNotice.value = true
+  window.setTimeout(() => (savedNotice.value = false), 2600)
+}
+
+const failSave = (message) => {
+  awaitingResponses = 0
+  window.clearTimeout(saveTimer)
+  isSaving.value = false
+  saveError.value = message
+}
+
+// 保存の応答が来たら1つ消し込む。下書きは全部返ってくるまで残す
+const countResponse = () => {
+  if (awaitingResponses === 0) return
+  awaitingResponses -= 1
+  if (awaitingResponses === 0) finishSave()
+}
+
 const save = () => {
   const groups = [
     { value: true, cells: pendingCells.value.filter((c) => c.value === true) },
     { value: false, cells: pendingCells.value.filter((c) => c.value === false) },
     { value: null, cells: pendingCells.value.filter((c) => c.value === null) },
-  ]
+  ].filter((g) => g.cells.length > 0)
 
+  saveError.value = ""
   isSaving.value = true
+  confirmOpen.value = false
+  awaitingResponses = groups.length
+
   for (const group of groups) {
-    if (group.cells.length === 0) continue
     socket.emit("setAvailability", {
       cells: group.cells.map(({ slotDate, slotHour }) => ({ slotDate, slotHour })),
       isAvailable: group.value,
     })
   }
 
-  // 送信済みの下書きは、サーバーからの反映を待たずに手元でも確定させる
-  pendingCells.value.forEach(({ key, slotDate, slotHour, value }) => {
-    if (value === null) availabilityMap.delete(key)
-    else availabilityMap.set(keyOf(slotDate, slotHour), value)
-  })
-  draftMap.clear()
-
-  confirmOpen.value = false
-  isSaving.value = false
-  savedNotice.value = true
-  window.setTimeout(() => (savedNotice.value = false), 2600)
+  saveTimer = window.setTimeout(
+    () => failSave("保存の応答がありませんでした。通信状況を確認して、もう一度お試しください"),
+    10000
+  )
 }
-
-const savedNotice = ref(false)
 
 // 未保存のまま離れてしまうのを防ぐ
 const warnBeforeUnload = (event) => {
@@ -212,12 +264,19 @@ onBeforeRouteLeave(() => {
 
       <div class="edit-bar__spacer"></div>
 
-      <span v-if="pendingCount > 0" class="pending-badge">未保存 {{ pendingCount }}件</span>
+      <span v-if="isSaving" class="saving-badge">保存中...</span>
+      <span v-else-if="pendingCount > 0" class="pending-badge">未保存 {{ pendingCount }}件</span>
       <span v-else-if="savedNotice" class="saved-badge">保存しました</span>
 
-      <v-btn size="small" variant="text" :disabled="pendingCount === 0" @click="discardDraft">破棄する</v-btn>
-      <v-btn size="small" color="primary" :disabled="pendingCount === 0" @click="openConfirm">保存する</v-btn>
+      <v-btn size="small" variant="text" :disabled="pendingCount === 0 || isSaving" @click="discardDraft">破棄する</v-btn>
+      <v-btn size="small" color="primary" :disabled="pendingCount === 0" :loading="isSaving" @click="openConfirm">
+        保存する
+      </v-btn>
     </div>
+
+    <v-alert v-if="saveError" type="error" density="compact" class="mb-3" closable @click:close="saveError = ''">
+      {{ saveError }}（変更は未保存のまま残しています）
+    </v-alert>
 
     <p v-if="bookedCount > 0" class="booked-note">
       確定した面接が {{ bookedCount }} 件あります。その枠は「面」と表示され、変更できません。
@@ -233,6 +292,7 @@ onBeforeRouteLeave(() => {
       <v-btn size="small" variant="outlined" @click="shiftWindow(-14)">&lt; 前の2週間</v-btn>
       <span class="text-body-2">{{ rangeStart }} 〜 {{ rangeEnd }}</span>
       <v-btn size="small" variant="outlined" @click="shiftWindow(14)">次の2週間 &gt;</v-btn>
+      <v-btn size="small" variant="text" :disabled="isCurrentWindow" @click="goToToday">今日に戻る</v-btn>
     </div>
 
     <CalendarPicker
@@ -240,7 +300,7 @@ onBeforeRouteLeave(() => {
       :range-end="rangeEnd"
       :cell-state="cellState"
       :cell-label="cellLabel"
-      :cell-locked="isBooked"
+      :cell-locked="isLocked"
       :cell-title="cellTitle"
       @cells-select="onCellsSelect"
     />
@@ -251,6 +311,7 @@ onBeforeRouteLeave(() => {
       <span><i class="swatch swatch--cleared"></i>未登録</span>
       <span><i class="swatch swatch--booked"></i>面接あり（変更できません）</span>
       <span><i class="swatch swatch--unsaved"></i>未保存の変更</span>
+      <span><i class="swatch swatch--past"></i>過ぎた日時（変更できません）</span>
     </div>
 
     <v-dialog v-model="confirmOpen" max-width="420">
@@ -296,6 +357,14 @@ onBeforeRouteLeave(() => {
   font-size: 12px;
   font-weight: 700;
 }
+.saving-badge {
+  border-radius: 999px;
+  background: #eef1f6;
+  padding: 4px 12px;
+  color: #42506a;
+  font-size: 12px;
+  font-weight: 700;
+}
 .saved-badge {
   border-radius: 999px;
   background: #e6f6ec;
@@ -326,6 +395,7 @@ onBeforeRouteLeave(() => {
 .swatch--cleared { background: #fff; }
 .swatch--booked { border-color: #1769ff; background: #1769ff; }
 .swatch--unsaved { border: 2px dashed #1a2235; background: #fff; }
+.swatch--past { background: #eef1f6; }
 
 .booked-note {
   margin: 0 0 12px;

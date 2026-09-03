@@ -1,14 +1,27 @@
 <script setup>
-import { computed, inject, ref } from "vue"
+import { computed, inject, onMounted, onUnmounted, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { clearSession } from "../../session.js"
 import socketManager from "../../socketManager.js"
 import HrIcon from "../hr/ui/HrIcon.vue"
+import { useNotifications } from "./notificationStore.js"
 
 const route = useRoute()
 const router = useRouter()
 const session = inject("session")
 const mobileMenuOpen = ref(false)
+
+// どの画面にいても未対応の通知に気づけるようにする
+const { pendingCount } = useNotifications()
+
+// サーバー側のハンドラが失敗したことを知らせる（黙って失敗させない）
+const socket = socketManager.getInstance()
+const errorMessage = ref("")
+const onAppError = ({ message }) => {
+  errorMessage.value = message ?? "処理に失敗しました"
+}
+onMounted(() => socket.on("appError", onAppError))
+onUnmounted(() => socket.off("appError", onAppError))
 
 const navItems = [
   { label: "ダッシュボード", icon: "dashboard", route: "interviewer-dashboard" },
@@ -44,6 +57,9 @@ const logout = () => {
         >
           <HrIcon :name="item.icon" :size="19" />
           <span>{{ item.label }}</span>
+          <span v-if="item.route === 'interviewer-dashboard' && pendingCount > 0" class="nav-badge">
+            {{ pendingCount }}
+          </span>
         </RouterLink>
       </nav>
 
@@ -65,6 +81,10 @@ const logout = () => {
     <main class="workspace">
       <RouterView />
     </main>
+
+    <v-snackbar :model-value="!!errorMessage" color="error" timeout="6000" @update:model-value="errorMessage = ''">
+      {{ errorMessage }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -93,6 +113,17 @@ const logout = () => {
 .main-nav a { display: flex; min-height: 45px; align-items: center; gap: 14px; border-radius: 9px; padding: 0 15px; color: #42506a; font-size: 13px; font-weight: 650; text-decoration: none; transition: background .18s, color .18s, transform .18s; }
 .main-nav a:hover { background: #f5f7fb; text-decoration: none; transform: translateX(2px); }
 .main-nav a.active { background: linear-gradient(90deg, #edf3ff, #f3f7ff); color: #1769ff; }
+.nav-badge {
+  min-width: 20px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: #c2740a;
+  padding: 2px 7px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
 
 .account-area { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding: 14px; }
 .account, .logout { display: flex; width: 100%; align-items: center; border: 1px solid #dee4ed; border-radius: 9px; background: #fff; color: #2c3850; }
@@ -111,6 +142,8 @@ const logout = () => {
   .app-shell { grid-template-columns: 72px minmax(0, 1fr); }
   .brand { justify-content: center; padding: 0; }
   .brand > div, .main-nav a span, .account__copy, .logout span { display: none; }
+  .main-nav a { position: relative; }
+  .main-nav a .nav-badge { position: absolute; top: 6px; right: 6px; display: block; margin: 0; padding: 1px 5px; font-size: 10px; }
   .main-nav { padding: 14px 10px; }
   .main-nav a { justify-content: center; padding: 0; }
   .account-area { padding: 10px; }
