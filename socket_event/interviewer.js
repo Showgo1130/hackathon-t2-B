@@ -87,9 +87,16 @@ export default async (io, socket) => {
     socket.emit("availabilityData", rows)
   })
 
-  socket.on("setAvailability", async ({ slotDate, slotHour, isAvailable }) => {
-    const row = await availabilityRepo.upsert({ interviewerId, slotDate, slotHour, isAvailable })
-    socket.emit("availabilityUpdated", row)
+  // 単一セルも範囲選択もこの経路を通る。isAvailable が null のときは登録を取り消す
+  socket.on("setAvailability", async ({ cells, isAvailable }) => {
+    if (!Array.isArray(cells) || cells.length === 0) return
+    if (isAvailable === null) {
+      await availabilityRepo.deleteMany({ interviewerId, cells })
+      socket.emit("availabilityCleared", cells)
+      return
+    }
+    const rows = await availabilityRepo.upsertMany({ interviewerId, cells, isAvailable })
+    socket.emit("availabilityUpdated", rows)
   })
 
   // 予定一覧：照合と承認で確定した面接を返す

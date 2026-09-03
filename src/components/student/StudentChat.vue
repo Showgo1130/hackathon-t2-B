@@ -53,10 +53,11 @@ const sendMessage = () => {
 }
 
 const cellState = (date, hour) => (selection.has(`${date}_${hour}`) ? "selected" : "unset")
-const toggleCell = ({ date, hour }) => {
-  const key = `${date}_${hour}`
-  if (selection.has(key)) selection.delete(key)
-  else selection.add(key)
+// 単セルは選択の反転、範囲選択はまとめて選択（全て選択済みならまとめて解除）
+const onCellsSelect = ({ cells }) => {
+  const keys = cells.map(({ date, hour }) => `${date}_${hour}`)
+  const shouldDeselect = keys.every((key) => selection.has(key))
+  keys.forEach((key) => (shouldDeselect ? selection.delete(key) : selection.add(key)))
 }
 const submitCalendar = (requestId) => {
   const slots = [...selection].map((key) => {
@@ -97,7 +98,7 @@ const logout = () => {
         :range-start="pendingCalendarRequest.payload.rangeStart"
         :range-end="pendingCalendarRequest.payload.rangeEnd"
         :cell-state="cellState"
-        @cell-click="toggleCell"
+        @cells-select="onCellsSelect"
       />
       <v-btn class="mt-3" color="primary" @click="submitCalendar(pendingCalendarRequest.payload.requestId)">
         この内容で送信する
