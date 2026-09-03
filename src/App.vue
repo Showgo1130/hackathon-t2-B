@@ -9,7 +9,9 @@ provide("session", session)
 // onMounted（子より後に走る）ではなくここで接続する。
 // これをしないと /hr や /interviewer を直接開いた・リロードしたときに画面が描画されない
 if (session.value?.token) {
-  socketManager.connect(session.value.token)
+  // ログイン直後に張った接続がある場合は、それを切らずに使い回す
+  try { socketManager.getInstance() }
+  catch { socketManager.connect(session.value.token) }
 }
 </script>
 

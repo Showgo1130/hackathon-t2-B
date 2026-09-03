@@ -1,16 +1,32 @@
 <script setup>
-import { computed, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
+import { session } from "../../session.js"
+import HrCreateUserDialog from "./HrCreateUserDialog.vue"
 import HrIcon from "./ui/HrIcon.vue"
 
+const dialogOpen = ref(false)
 const activeRole = ref("all")
 const searchQuery = ref("")
+const toast = ref("")
+const isCreating = ref(false)
+const createError = ref("")
+const loading = ref(true)
+const loadError = ref("")
 
-const users = ref([
-  { id: 1, name: "田中 太郎", email: "student1@example.com", role: "student", roleLabel: "学生", organization: "青山大学", status: "active", createdAt: "2026/09/01" },
-  { id: 2, name: "鈴木 一郎", email: "interviewer1@example.com", role: "interviewer", roleLabel: "面接官", organization: "開発部", status: "active", createdAt: "2026/08/28" },
-  { id: 3, name: "高橋 美咲", email: "interviewer2@example.com", role: "interviewer", roleLabel: "面接官", organization: "事業企画部", status: "invited", createdAt: "2026/08/28" },
-  { id: 4, name: "山田 花子", email: "hr1@example.com", role: "hr", roleLabel: "人事", organization: "人事部", status: "active", createdAt: "2026/08/20" },
-])
+const users = ref([])
+const roleLabels = { student: "学生", interviewer: "面接官", hr: "人事" }
+const formatDate = (value) => value ? new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value)) : "—"
+const loadUsers = async () => {
+  loading.value = true; loadError.value = ""
+  try {
+    const response = await fetch("/api/users", { headers: { Authorization: `Bearer ${session.value?.token ?? ""}` } })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error)
+    users.value = result.users.map((user) => ({ ...user, roleLabel: roleLabels[user.role], createdAt: formatDate(user.createdAt) }))
+  } catch { loadError.value = "ユーザー情報を取得できませんでした。" }
+  finally { loading.value = false }
+}
+onMounted(loadUsers)
 
 const tabs = computed(() => [
   { value: "all", label: "すべて", count: users.value.length },
@@ -23,7 +39,7 @@ const filteredUsers = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
   return users.value.filter((user) => {
     const roleMatches = activeRole.value === "all" || user.role === activeRole.value
-    const queryMatches = !query || [user.name, user.email, user.organization].some((value) => value.toLowerCase().includes(query))
+    const queryMatches = !query || [user.name, user.email].some((value) => value.toLowerCase().includes(query))
     return roleMatches && queryMatches
   })
 })
@@ -35,6 +51,26 @@ const summary = computed(() => ({
   hr: users.value.filter((user) => user.role === "hr").length,
 }))
 
+const openCreateDialog = () => { createError.value = ""; dialogOpen.value = true }
+const createUser = async (user) => {
+  isCreating.value = true; createError.value = ""
+  try {
+    const response = await fetch("/api/users", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.value?.token ?? ""}` },
+      body: JSON.stringify({ role: user.role, name: user.name, email: user.email, password: user.password }),
+    })
+    const result = await response.json()
+    if (!response.ok) {
+      createError.value = result.error === "email_already_exists" ? "このメールアドレスはすでに登録されています。" : "ユーザーの作成に失敗しました。"
+      return
+    }
+    users.value.unshift({ ...result, roleLabel: roleLabels[result.role], createdAt: formatDate(result.createdAt) })
+    dialogOpen.value = false; toast.value = `${result.name}さんのアカウントを作成しました`
+    window.setTimeout(() => { toast.value = "" }, 2800)
+  } catch { createError.value = "サーバーに接続できませんでした。" }
+  finally { isCreating.value = false }
+}
+
 const roleIcon = (role) => role === "student" ? "student" : role === "interviewer" ? "briefcase" : "shield"
 </script>
 
@@ -42,6 +78,7 @@ const roleIcon = (role) => role === "student" ? "student" : role === "interviewe
   <div class="users-page">
     <header class="page-header">
       <div><span class="eyebrow">ACCOUNT MANAGEMENT</span><h1>ユーザー管理</h1><p>採用プロセスに参加するユーザーと権限を管理します。</p></div>
+      <button class="add-button" type="button" @click="openCreateDialog"><HrIcon name="user-plus" :size="18" />ユーザーを作成</button>
     </header>
 
     <aside class="permission-note"><span><HrIcon name="shield" :size="19" /></span><div><strong>人事権限でのみ操作できます</strong><p>学生・面接官・他の人事アカウントを作成できるのは人事ユーザーだけです。</p></div></aside>
@@ -63,23 +100,22 @@ const roleIcon = (role) => role === "student" ? "student" : role === "interviewe
 
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ユーザー</th><th>種別</th><th>所属</th><th>ステータス</th><th>作成日</th><th></th></tr></thead>
+          <thead><tr><th>ユーザー</th><th>種別</th><th>作成日</th><th></th></tr></thead>
           <tbody>
             <tr v-for="user in filteredUsers" :key="user.id">
               <td><div class="user-cell"><span :class="`avatar avatar--${user.role}`">{{ user.name.slice(0, 1) }}</span><div><strong>{{ user.name }}</strong><small>{{ user.email }}</small></div></div></td>
               <td><span :class="`role-badge role-badge--${user.role}`"><HrIcon :name="roleIcon(user.role)" :size="13" />{{ user.roleLabel }}</span></td>
-              <td>{{ user.organization || "—" }}</td>
-              <td><span :class="`status status--${user.status}`"><i></i>{{ user.status === "active" ? "利用中" : "招待中" }}</span></td>
               <td>{{ user.createdAt }}</td>
               <td><button class="more-button" type="button" aria-label="操作メニュー"><HrIcon name="more" :size="18" /></button></td>
             </tr>
           </tbody>
         </table>
-        <div v-if="filteredUsers.length === 0" class="empty"><span><HrIcon name="search" /></span><strong>該当するユーザーがいません</strong><p>検索条件を変更してください。</p></div>
+        <div v-if="loading || loadError || filteredUsers.length === 0" class="empty"><span><HrIcon :name="loading ? 'users' : 'search'" /></span><strong>{{ loading ? "DBから読み込んでいます" : loadError || "該当するユーザーがいません" }}</strong><p v-if="!loading && !loadError">検索条件を変更してください。</p></div>
       </div>
       <footer class="panel-footer">{{ filteredUsers.length }}件を表示</footer>
     </section>
-
+    <Transition name="toast"><div v-if="toast" class="toast"><span><HrIcon name="check" :size="14" /></span>{{ toast }}</div></Transition>
+    <HrCreateUserDialog :open="dialogOpen" :submitting="isCreating" :server-error="createError" @close="dialogOpen = false" @create="createUser" />
   </div>
 </template>
 
