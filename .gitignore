@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .env
+
+# DBのバックアップ（実データなのでコミットしない）
+backups/

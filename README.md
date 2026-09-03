@@ -58,11 +58,25 @@ Windows は WSL2 上の Ubuntu、Mac はネイティブ環境で実行します�
 
 > HTTPSで動作させたい場合は `.env.sample` のコメントを参照して `.env` を作成すること。EC2運用時の `/etc/ssl/*` を読み込んでいた挙動は廃止し、`HTTPS=true` 指定時のみ証明書パスを読み込むようにした。
 
+## データベースのバックアップ
+
+実データを触る前に必ずバックアップを取る。復元まで含めて動作確認済み。
+
+```bash
+npm run db:backup                       # backups/<日時>/ に全テーブルをJSONで保存
+npm run db:restore -- backups/<日時>     # そのバックアップの状態に戻す
+npm run db:clear -- --yes               # 中身だけ空にする（テーブル定義は残る）
+```
+
+`backups/` は実データ（メールアドレスやパスワードハッシュ）を含むため git 管理外。
+`db:restore` は既存の行を消してから入れ直すので、バックアップ時点の状態に戻る。
+
 ## テスト
 
 ```bash
-npm test          # 全テストを実行
+npm test          # DBに依存しないテスト（単体＋照合エンジン＋Socket.io）
 npm run test:watch
+npm run test:e2e  # 実際のDBと開発サーバーに対する通しテスト
 ```
 
 Node 標準のテストランナー（`node --test`）を使う。追加の依存パッケージは不要。
@@ -73,6 +87,10 @@ Node 標準のテストランナー（`node --test`）を使う。追加の依�
 - `tests/socketFlow.test.js` — Socket.io のハンドラを実サーバー・実クライアントで通しで検証する
 - `tests/helpers/fakeSupabase.js` — Supabase クライアントのインメモリ版。
   テストでは `server/supabaseClient.js` だけを差し替えるので、DB以外は本番と同じコードが動く
+- `tests/e2e/scenario.test.js` — 実際の Supabase と開発サーバーに対する業務シナリオの通しテスト。
+  人事のアカウント作成から空き登録・一括送信・候補提出・承認・確定・結果報告までを、
+  ログインと Socket.io の本番と同じ経路でなぞる。実行前に別ターミナルで `npm start` しておくこと。
+  **実データを書き込むので、先に `npm run db:backup` を取ること**
 
 ## 機能
 
