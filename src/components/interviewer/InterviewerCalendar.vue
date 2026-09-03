@@ -35,6 +35,17 @@ const loadAvailability = () => {
   socket.emit("loadAvailability", { rangeStart: rangeStart.value, rangeEnd: rangeEnd.value })
 }
 
+// 確定した面接。空き予定の上に「面接あり」として重ねて表示する（編集はさせない）
+const bookedMap = reactive(new Map())
+const onScheduleData = (rows) => {
+  bookedMap.clear()
+  rows.forEach((row) => {
+    bookedMap.set(keyOf(row.confirmedDate, row.confirmedHour), row)
+  })
+}
+const isBooked = (date, hour) => bookedMap.has(keyOf(date, hour))
+const bookedCount = computed(() => bookedMap.size)
+
 const onAvailabilityData = (rows) => applyRows(rows)
 const onAvailabilityUpdated = (rows) => applyRows(rows)
 const onAvailabilityCleared = (cells) => clearCells(cells)
@@ -43,12 +54,15 @@ onMounted(() => {
   socket.on("availabilityData", onAvailabilityData)
   socket.on("availabilityUpdated", onAvailabilityUpdated)
   socket.on("availabilityCleared", onAvailabilityCleared)
+  socket.on("scheduleData", onScheduleData)
   loadAvailability()
+  socket.emit("loadSchedules")
 })
 onUnmounted(() => {
   socket.off("availabilityData", onAvailabilityData)
   socket.off("availabilityUpdated", onAvailabilityUpdated)
   socket.off("availabilityCleared", onAvailabilityCleared)
+  socket.off("scheduleData", onScheduleData)
 })
 
 const shiftWindow = (days) => {
@@ -83,16 +97,25 @@ const pendingBreakdown = computed(() => ({
 }))
 
 const cellState = (date, hour) => {
+  if (isBooked(date, hour)) return "booked"
   const key = keyOf(date, hour)
   const v = currentValue(key)
   const base = v === true ? "available" : v === false ? "unavailable" : "unset"
   return draftMap.has(key) ? `${base} unsaved` : base
 }
 const cellLabel = (date, hour) => {
+  if (isBooked(date, hour)) return "面"
   const v = currentValue(keyOf(date, hour))
   if (v === true) return "○"
   if (v === false) return "×"
   return "-"
+}
+
+const roundLabel = (round) => (round >= 3 ? "最終面接" : `${round}次面接`)
+const cellTitle = (date, hour) => {
+  const booked = bookedMap.get(keyOf(date, hour))
+  if (booked) return `${booked.studentName}／${roundLabel(booked.round)}（面接が確定しています）`
+  return ""
 }
 
 // 塗るモード。ドラッグでも単クリックでも、選択したセルをこの状態にする
@@ -103,7 +126,11 @@ const paintValue = computed(() => {
   return null
 })
 
-const onCellsSelect = ({ cells }) => {
+const onCellsSelect = ({ cells: selected }) => {
+  // 確定した面接の枠は変更させない（CalendarPicker 側でも除外しているが二重に守る）
+  const cells = selected.filter(({ date, hour }) => !isBooked(date, hour))
+  if (cells.length === 0) return
+
   // 単セルを同じ状態に塗り直したときは取り消しとみなす（誤クリックを戻せるようにする）
   const firstKey = keyOf(cells[0].date, cells[0].hour)
   const isUndo = cells.length === 1 && paintValue.value !== null && currentValue(firstKey) === paintValue.value
@@ -192,6 +219,11 @@ onBeforeRouteLeave(() => {
       <v-btn size="small" color="primary" :disabled="pendingCount === 0" @click="openConfirm">保存する</v-btn>
     </div>
 
+    <p v-if="bookedCount > 0" class="booked-note">
+      確定した面接が {{ bookedCount }} 件あります。その枠は「面」と表示され、変更できません。
+      カーソルを合わせると候補者名が出ます。
+    </p>
+
     <p class="hint">
       セルをドラッグすると範囲をまとめて選べます。日付・時刻の見出しをクリックすると、その列・行をまとめて選べます。
       <strong>変更は「保存する」を押すまで反映されません</strong>（点線の枠が未保存の変更です）。
@@ -208,8 +240,18 @@ onBeforeRouteLeave(() => {
       :range-end="rangeEnd"
       :cell-state="cellState"
       :cell-label="cellLabel"
+      :cell-locked="isBooked"
+      :cell-title="cellTitle"
       @cells-select="onCellsSelect"
     />
+
+    <div class="legend">
+      <span><i class="swatch swatch--available"></i>空き</span>
+      <span><i class="swatch swatch--unavailable"></i>不可</span>
+      <span><i class="swatch swatch--cleared"></i>未登録</span>
+      <span><i class="swatch swatch--booked"></i>面接あり（変更できません）</span>
+      <span><i class="swatch swatch--unsaved"></i>未保存の変更</span>
+    </div>
 
     <v-dialog v-model="confirmOpen" max-width="420">
       <v-card class="pa-5">
@@ -282,6 +324,29 @@ onBeforeRouteLeave(() => {
 .swatch--available { border-color: #2ecc71; background: #2ecc71; }
 .swatch--unavailable { border-color: #e74c3c; background: #e74c3c; }
 .swatch--cleared { background: #fff; }
+.swatch--booked { border-color: #1769ff; background: #1769ff; }
+.swatch--unsaved { border: 2px dashed #1a2235; background: #fff; }
+
+.booked-note {
+  margin: 0 0 12px;
+  border-left: 3px solid #1769ff;
+  border-radius: 0 8px 8px 0;
+  background: #f5f8ff;
+  padding: 10px 12px;
+  color: #1a2235;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 14px;
+  color: #69758b;
+  font-size: 12px;
+}
+.legend span { display: flex; align-items: center; gap: 6px; }
 
 .iv-page {
   height: 100%;
