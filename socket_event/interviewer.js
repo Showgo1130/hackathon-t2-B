@@ -45,13 +45,12 @@ export default async (io, socket) => {
     }
   }
 
-  const conversation = await conversationsRepo.findOrCreateForInterviewer(interviewerId, null)
-  socket.join(roomOf(conversation.id))
-
-  const history = await messagesRepo.listForConversation(conversation.id)
-  socket.emit("init", { conversationId: conversation.id, messages: history })
+  // 会話の取得を待つ前にハンドラを登録する。await を挟むと、その間に届いた
+  // loadSchedules などのイベントが受け手不在で捨てられてしまう
+  const conversationPromise = conversationsRepo.findOrCreateForInterviewer(interviewerId, null)
 
   const respondToCheck = async (check, isAvailable) => {
+    const conversation = await conversationPromise
     const { slotDate, slotHour } = check.payload
     const message = await messagesRepo.create({
       conversationId: conversation.id,
@@ -68,6 +67,7 @@ export default async (io, socket) => {
 
   socket.on("sendMessage", safe(async ({ body }) => {
     if (!body || !body.trim()) return
+    const conversation = await conversationPromise
     const text = body.trim()
     const message = await messagesRepo.create({
       conversationId: conversation.id,
@@ -147,4 +147,9 @@ export default async (io, socket) => {
   }
 
   socket.on("loadSchedules", safe(sendSchedules))
+
+  const conversation = await conversationPromise
+  socket.join(roomOf(conversation.id))
+  const history = await messagesRepo.listForConversation(conversation.id)
+  socket.emit("init", { conversationId: conversation.id, messages: history })
 }

@@ -1,16 +1,18 @@
 <script setup>
-import { onMounted, provide } from "vue"
+import { provide } from "vue"
 import { session } from "./session.js"
 import socketManager from "./socketManager.js"
 
 provide("session", session)
 
-onMounted(() => {
-  if (session.value?.token) {
-    try { socketManager.getInstance() }
-    catch { socketManager.connect(session.value.token) }
-  }
-})
+// 各画面は setup の時点で接続済みのソケットを要求するため、
+// onMounted（子より後に走る）ではなくここで接続する。
+// これをしないと /hr や /interviewer を直接開いた・リロードしたときに画面が描画されない
+if (session.value?.token) {
+  // ログイン直後に張った接続がある場合は、それを切らずに使い回す
+  try { socketManager.getInstance() }
+  catch { socketManager.connect(session.value.token) }
+}
 </script>
 
 <template>

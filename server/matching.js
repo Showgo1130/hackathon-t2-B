@@ -3,6 +3,7 @@ import { interviewRequestsRepo } from "./repositories/interviewRequests.js"
 import { candidateSlotsRepo } from "./repositories/candidateSlots.js"
 import { conversationsRepo } from "./repositories/conversations.js"
 import { messagesRepo } from "./repositories/messages.js"
+import { studentsRepo } from "./repositories/students.js"
 
 const roomOf = (conversationId) => `conv:${conversationId}`
 
@@ -12,6 +13,18 @@ const APPROVAL_REQUEST = "match_approval"
 const APPROVAL_ANSWER = "match_approval_answer"
 
 const slotLabel = (slotDate, slotHour) => `${slotDate} ${String(slotHour).padStart(2, "0")}:00`
+const roundLabel = (round) => (round >= 3 ? "最終面接" : `${round}次面接`)
+
+// 面接官への通知に「誰との何次面接か」を載せる。
+// 何次面接かはカラムが無いため、その学生の確定済み面接の数から求める
+const describeRequest = async (request) => {
+  const [student, confirmed] = await Promise.all([
+    studentsRepo.findById(request.student_id),
+    interviewRequestsRepo.listConfirmed(),
+  ])
+  const round = confirmed.filter((r) => r.student_id === request.student_id).length + 1
+  return { studentName: student?.name ?? "候補者", round }
+}
 
 const postMessage = async (io, conversationId, messageData) => {
   const message = await messagesRepo.create({ conversationId, ...messageData })
@@ -77,6 +90,7 @@ const loadApprovalState = async (request) => {
 
 // ④ 全員の空きが合ったので、各面接官に承認を依頼する（まだ確定はしない）
 const requestApproval = async (io, request, slot, approvalState, interviewerIds = request.interviewer_ids) => {
+  const { studentName, round } = await describeRequest(request)
   for (const interviewerId of interviewerIds) {
     const key = keyOf(interviewerId, slot.slot_date, slot.slot_hour)
     if (approvalState.answers.has(key) || approvalState.openRequests.has(key)) continue
@@ -85,13 +99,15 @@ const requestApproval = async (io, request, slot, approvalState, interviewerIds 
     await postMessage(io, conversation.id, {
       senderKind: "system",
       senderId: null,
-      body: `${slotLabel(slot.slot_date, slot.slot_hour)} で日程が合いました。この日程で確定してよろしいですか？`,
+      body: `${studentName} さん（${roundLabel(round)}）の日程が ${slotLabel(slot.slot_date, slot.slot_hour)} で合いました。この日程で確定してよろしいですか？`,
       msgType: "system_notice",
       payload: {
         kind: APPROVAL_REQUEST,
         slotDate: slot.slot_date,
         slotHour: slot.slot_hour,
         candidateSlotId: slot.id,
+        studentName,
+        round,
       },
       requestId: request.id,
     })
@@ -104,8 +120,10 @@ const finalize = async (io, request, slot) => {
     slotDate: slot.slot_date,
     slotHour: slot.slot_hour,
   })
+  const { studentName, round } = await describeRequest(request)
   const body = `面接日程が確定しました: ${slotLabel(slot.slot_date, slot.slot_hour)}`
-  const payload = { confirmedDate: slot.slot_date, confirmedHour: slot.slot_hour }
+  const interviewerBody = `${studentName} さん（${roundLabel(round)}）の面接日程が確定しました: ${slotLabel(slot.slot_date, slot.slot_hour)}`
+  const payload = { confirmedDate: slot.slot_date, confirmedHour: slot.slot_hour, studentName, round }
 
   const studentConversation = await conversationsRepo.findOrCreateForStudent(request.student_id, request.hr_id)
   await postMessage(io, studentConversation.id, {
@@ -122,7 +140,7 @@ const finalize = async (io, request, slot) => {
     await postMessage(io, conversation.id, {
       senderKind: "system",
       senderId: null,
-      body,
+      body: interviewerBody,
       msgType: "system_notice",
       payload,
       requestId: request.id,
@@ -150,12 +168,13 @@ const sendAvailabilityCheck = async (io, request, interviewerId, slot) => {
   const existing = await messagesRepo.findPendingAvailabilityCheck(conversation.id, request.id, slot.slot_date, slot.slot_hour)
   if (existing) return
 
+  const { studentName, round } = await describeRequest(request)
   await postMessage(io, conversation.id, {
     senderKind: "system",
     senderId: null,
-    body: `${slotLabel(slot.slot_date, slot.slot_hour)} は面接可能ですか？`,
+    body: `${studentName} さん（${roundLabel(round)}）の面接候補です。${slotLabel(slot.slot_date, slot.slot_hour)} は面接可能ですか？`,
     msgType: "availability_check",
-    payload: { slotDate: slot.slot_date, slotHour: slot.slot_hour, candidateSlotId: slot.id },
+    payload: { slotDate: slot.slot_date, slotHour: slot.slot_hour, candidateSlotId: slot.id, studentName, round },
     requestId: request.id,
   })
 }
