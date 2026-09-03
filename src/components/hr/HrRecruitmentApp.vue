@@ -17,7 +17,7 @@ const navItems = [
   { label: "ユーザー管理", icon: "user-plus", route: "hr-users" },
 ]
 
-const displayName = computed(() => session?.value?.name || "山田 花子")
+const displayName = computed(() => session?.value?.name || "人事")
 const activeRoute = (name) => name === "hr-chat"
   ? route.name === "hr-chat" || route.name === "hr-chat-room"
   : route.name === name
@@ -52,8 +52,8 @@ const logout = () => {
 
       <div class="account-area">
         <button class="account" type="button">
-          <span class="avatar avatar--hr">花</span>
-          <span class="account__copy"><strong>{{ displayName }}</strong><small>人事部 採用担当</small></span>
+          <span class="avatar avatar--hr">{{ displayName.slice(0, 1) }}</span>
+          <span class="account__copy"><strong>{{ displayName }}</strong><small>人事アカウント</small></span>
           <HrIcon name="chevron-down" :size="16" />
         </button>
         <button class="logout" type="button" @click="logout">
