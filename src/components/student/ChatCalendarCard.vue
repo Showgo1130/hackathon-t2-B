@@ -5,7 +5,8 @@ const props = defineProps({
   rangeStart: { type: String, required: true }, // "YYYY-MM-DD"
   rangeEnd: { type: String, required: true },
   hours: { type: Array, default: () => [9, 10, 11, 12, 13, 14, 15, 16, 17] },
-  readonly: { type: Boolean, default: false } // HR views this component as readonly if needed
+  readonly: { type: Boolean, default: false }, // HR views this component as readonly if needed
+  submittedSlots: { type: Array, default: () => [] } // 提出済み { slotDate, slotHour } の一覧（readonly時の表示用）
 })
 
 const emit = defineEmits(["submit"])
@@ -66,22 +67,21 @@ const calendarMonths = computed(() => {
   })
 })
 
-const selectedDate = ref(rangeDates.value[0])
+const keyOf = (date, hour) => `${date}_${hour}`
+
 const selection = reactive(new Set())
 
-// Initialize selection with ALL hours for ALL dates
+// デフォルトでは何も選択しない。提出済みスロットがある場合はそれだけを反映する
 const initSelection = () => {
   selection.clear()
-  rangeDates.value.forEach(d => {
-    props.hours.forEach(h => {
-      selection.add(`${d}_${h}`)
-    })
+  props.submittedSlots.forEach(({ slotDate, slotHour }) => {
+    selection.add(keyOf(slotDate, slotHour))
   })
 }
 // Call immediately
 initSelection()
 
-const keyOf = (date, hour) => `${date}_${hour}`
+const selectedDate = ref(props.submittedSlots[0]?.slotDate ?? null)
 const isSelected = (date, hour) => selection.has(keyOf(date, hour))
 const isSelectedOnCurrent = (hour) => isSelected(selectedDate.value, hour)
 
@@ -207,7 +207,7 @@ const hasSelection = (dateStr) => {
           :key="hour"
           type="button"
           :variant="isSelectedOnCurrent(hour) ? 'flat' : 'outlined'"
-          :color="isSelectedOnCurrent(hour) ? 'black' : 'grey-darken-1'"
+          :color="isSelectedOnCurrent(hour) ? 'primary' : 'grey-darken-1'"
           class="hour-btn"
           size="small"
           :disabled="readonly"
@@ -217,6 +217,9 @@ const hasSelection = (dateStr) => {
         </v-btn>
       </div>
     </div>
+    <div v-else-if="!readonly" class="text-caption text-medium-emphasis pick-date-hint">
+      日にちを選ぶと、時間帯を選べます
+    </div>
 
     <v-divider class="my-4" v-if="!readonly" />
 
@@ -225,7 +228,7 @@ const hasSelection = (dateStr) => {
         選択中の候補: <strong>{{ selection.size }}</strong> 件
       </div>
       <v-btn
-        color="black"
+        color="primary"
         :disabled="!canSubmit"
         @click="confirmAndSubmit"
       >
@@ -243,6 +246,8 @@ const hasSelection = (dateStr) => {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
+  max-width: 360px;
+  margin: 0 auto;
 }
 .day-header {
   text-align: center;
@@ -255,7 +260,7 @@ const hasSelection = (dateStr) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 17px;
   border-radius: 4px;
   border: 1px solid transparent;
 }
@@ -281,8 +286,8 @@ const hasSelection = (dateStr) => {
   font-weight: bold;
 }
 .date-cell.selected-date {
-  background: #111827;
-  border-color: #111827;
+  background: #1769ff;
+  border-color: #1769ff;
   color: white;
   font-weight: bold;
 }
@@ -293,5 +298,9 @@ const hasSelection = (dateStr) => {
 }
 .hour-btn {
   min-width: 72px;
+}
+.pick-date-hint {
+  text-align: center;
+  padding: 8px 0;
 }
 </style>
