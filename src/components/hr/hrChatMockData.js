@@ -72,11 +72,7 @@ export const hrChatRooms = [
     unread: 0,
   },
   {
-    id: "hr-kobayashi",
-    role: "hr",
-    roleLabel: "人事",
-    name: "小林 美穂",
-    detail: "人事部・新卒採用担当",
+    roleLabel: "他人事",
     status: "オンライン",
     lastMessage: "田中さんの面接官調整を進めます。",
     reply: ["共有ありがとうございます。", "こちらで面接官調整を進めます。"],
