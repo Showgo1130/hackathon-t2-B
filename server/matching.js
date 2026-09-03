@@ -31,16 +31,26 @@ const collectAnswers = async (interviewerIds, slotDate, slotHour) => {
 const keyOf = (interviewerId, slotDate, slotHour) => `${interviewerId}_${slotDate}_${slotHour}`
 const slotKeyOf = (slotDate, slotHour) => `${slotDate}_${slotHour}`
 
-// 担当面接官の誰かが既に別の面接で埋めている日時を集める（ダブルブッキング防止）
-const collectBusySlotKeys = async (interviewerIds) => {
+// 日時ごとに、別の面接で埋まっている面接官を集める（ダブルブッキング防止）
+const collectBusyInterviewers = async (interviewerIds) => {
   const confirmed = await interviewRequestsRepo.listConfirmed()
-  const keys = new Set()
+  const bySlot = new Map()
   for (const request of confirmed) {
-    if (request.interviewer_ids.some((id) => interviewerIds.includes(id))) {
-      keys.add(slotKeyOf(request.confirmed_date, request.confirmed_hour))
+    const busyIds = request.interviewer_ids.filter((id) => interviewerIds.includes(id))
+    if (busyIds.length) {
+      const key = slotKeyOf(request.confirmed_date, request.confirmed_hour)
+      if (!bySlot.has(key)) bySlot.set(key, new Set())
+      busyIds.forEach((id) => bySlot.get(key).add(id))
     }
   }
-  return keys
+  return bySlot
+}
+
+const requiredCountFor = async (request) => {
+  const requestMessage = await messagesRepo.findCalendarRequest(request.id)
+  const configured = Number(requestMessage?.payload?.requiredInterviewerCount)
+  return Math.min(request.interviewer_ids.length,
+    Number.isInteger(configured) && configured > 0 ? configured : request.interviewer_ids.length)
 }
 
 // 各面接官の承認回答（true=承認 / false=否認 / 未回答はキーなし）と、
@@ -66,8 +76,8 @@ const loadApprovalState = async (request) => {
 }
 
 // ④ 全員の空きが合ったので、各面接官に承認を依頼する（まだ確定はしない）
-const requestApproval = async (io, request, slot, approvalState) => {
-  for (const interviewerId of request.interviewer_ids) {
+const requestApproval = async (io, request, slot, approvalState, interviewerIds = request.interviewer_ids) => {
+  for (const interviewerId of interviewerIds) {
     const key = keyOf(interviewerId, slot.slot_date, slot.slot_hour)
     if (approvalState.answers.has(key) || approvalState.openRequests.has(key)) continue
 
@@ -158,50 +168,32 @@ export const evaluateRequest = async (io, request) => {
 
   const pendingSlots = slots.filter((s) => s.status === "pending_check")
   const approvalState = await loadApprovalState(request)
-  const busySlotKeys = await collectBusySlotKeys(request.interviewer_ids)
+  const busyInterviewers = await collectBusyInterviewers(request.interviewer_ids)
+  const requiredCount = await requiredCountFor(request)
 
   for (const slot of pendingSlots) {
     const answers = await collectAnswers(request.interviewer_ids, slot.slot_date, slot.slot_hour)
-    const values = Object.values(answers)
+    const busyIds = busyInterviewers.get(slotKeyOf(slot.slot_date, slot.slot_hour)) ?? new Set()
+    const isEligible = (id) => !busyIds.has(id) && approvalState.answers.get(keyOf(id, slot.slot_date, slot.slot_hour)) !== false
+    const availableIds = Object.entries(answers).filter(([id, value]) => value === true && isEligible(id)).map(([id]) => id)
+    const undecidedIds = Object.entries(answers).filter(([id, value]) => value === null && isEligible(id)).map(([id]) => id)
 
-    if (values.some((v) => v === false)) {
-      await candidateSlotsRepo.setStatus(slot.id, "rejected")
-      continue
-    }
-
-    if (values.every((v) => v === true)) {
-      // 既に別の面接で埋まっている日時は候補にしない
-      if (busySlotKeys.has(slotKeyOf(slot.slot_date, slot.slot_hour))) {
-        await candidateSlotsRepo.setStatus(slot.id, "rejected")
-        continue
-      }
-
-      // 一度否認された日時は、学生が再提示しても候補に戻さない
-      const denied = request.interviewer_ids.some(
-        (id) => approvalState.answers.get(keyOf(id, slot.slot_date, slot.slot_hour)) === false
-      )
-      if (denied) {
-        await candidateSlotsRepo.setStatus(slot.id, "rejected")
-        continue
-      }
-
+    if (availableIds.length >= requiredCount) {
       await candidateSlotsRepo.setStatus(slot.id, "available_confirmed")
-
-      const allApproved = request.interviewer_ids.every(
-        (id) => approvalState.answers.get(keyOf(id, slot.slot_date, slot.slot_hour)) === true
-      )
-      if (allApproved) {
+      const approvedCount = availableIds.filter((id) => approvalState.answers.get(keyOf(id, slot.slot_date, slot.slot_hour)) === true).length
+      if (approvedCount >= requiredCount) {
         await finalize(io, request, slot)
       } else {
-        await requestApproval(io, request, slot, approvalState)
+        await requestApproval(io, request, slot, approvalState, availableIds)
       }
       return
     }
 
-    const unknownInterviewerIds = Object.entries(answers)
-      .filter(([, v]) => v === null)
-      .map(([id]) => id)
-    for (const interviewerId of unknownInterviewerIds) {
+    if (availableIds.length + undecidedIds.length < requiredCount) {
+      await candidateSlotsRepo.setStatus(slot.id, "rejected")
+      continue
+    }
+    for (const interviewerId of undecidedIds) {
       await sendAvailabilityCheck(io, request, interviewerId, slot)
     }
   }
@@ -261,29 +253,31 @@ export const respondToMatchApproval = async (io, { interviewerId, requestId, slo
 
   const slot = await candidateSlotsRepo.findByRequestAndSlot(requestId, slotDate, slotHour)
   if (!slot) return
+  const requiredCount = await requiredCountFor(request)
 
   if (!approved) {
-    await candidateSlotsRepo.setStatus(slot.id, "rejected")
-    // 他の面接官に出している承認依頼を打ち切る
-    for (const otherId of request.interviewer_ids) {
-      if (otherId === interviewerId) continue
-      if (latest.has(keyOf(otherId, slotDate, slotHour))) continue
-      const otherConversation = await conversationsRepo.findOrCreateForInterviewer(otherId, request.hr_id)
-      await postMessage(io, otherConversation.id, {
-        senderKind: "system",
-        senderId: null,
-        body: `${slotLabel(slotDate, slotHour)} は他の面接官が見送ったため、この日程の承認は不要になりました`,
-        msgType: "system_notice",
-        payload: { kind: "match_approval_cancelled", slotDate, slotHour },
-        requestId,
-      })
+    const availability = await collectAnswers(request.interviewer_ids, slotDate, slotHour)
+    const busy = (await collectBusyInterviewers(request.interviewer_ids)).get(slotKeyOf(slotDate, slotHour)) ?? new Set()
+    const possibleCount = request.interviewer_ids.filter((id) => availability[id] === true && !busy.has(id)
+      && latest.get(keyOf(id, slotDate, slotHour)) !== false).length
+    if (possibleCount < requiredCount) {
+      await candidateSlotsRepo.setStatus(slot.id, "rejected")
+      for (const otherId of request.interviewer_ids) {
+        if (otherId === interviewerId || latest.has(keyOf(otherId, slotDate, slotHour))) continue
+        const otherConversation = await conversationsRepo.findOrCreateForInterviewer(otherId, request.hr_id)
+        await postMessage(io, otherConversation.id, {
+          senderKind: "system", senderId: null,
+          body: `${slotLabel(slotDate, slotHour)} は必要人数を満たせないため、この日程の承認は不要になりました`,
+          msgType: "system_notice", payload: { kind: "match_approval_cancelled", slotDate, slotHour }, requestId,
+        })
+      }
+      await evaluateRequest(io, request)
     }
-    await evaluateRequest(io, request)
     return
   }
 
-  const allApproved = request.interviewer_ids.every((id) => latest.get(keyOf(id, slotDate, slotHour)) === true)
-  if (allApproved) {
+  const approvedCount = request.interviewer_ids.filter((id) => latest.get(keyOf(id, slotDate, slotHour)) === true).length
+  if (approvedCount >= requiredCount) {
     // 同時承認で finalize が二重に走らないよう、直前に状態を取り直す
     const fresh = await interviewRequestsRepo.findById(requestId)
     if (fresh?.status !== "matching") return

@@ -29,6 +29,27 @@ export const messagesRepo = {
     return data
   },
 
+  async findCalendarRequest(requestId) {
+    const { data, error } = await supabase.from("messages").select("*")
+      .eq("request_id", requestId).eq("msg_type", "calendar_request")
+      .order("created_at", { ascending: false }).limit(1).maybeSingle()
+    if (error) throw error
+    return data
+  },
+
+  async listCalendarRequests() {
+    const { data, error } = await supabase.from("messages").select("*")
+      .eq("msg_type", "calendar_request").order("created_at")
+    if (error) throw error
+    return data
+  },
+
+  async updatePayload(id, payload) {
+    const { data, error } = await supabase.from("messages").update({ payload }).eq("id", id).select().single()
+    if (error) throw error
+    return data
+  },
+
   // 同じスロットへの確認メッセージを二重送信しないためのチェック
   async findPendingAvailabilityCheck(conversationId, requestId, slotDate, slotHour) {
     const { data, error } = await supabase

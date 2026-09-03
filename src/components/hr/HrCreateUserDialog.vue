@@ -77,7 +77,7 @@ const submit = () => {
 
           <label class="field">
             <span>氏名 <i>必須</i></span>
-            <input v-model="form.name" type="text" autocomplete="off" placeholder="例：佐藤 花子" />
+            <input v-model="form.name" type="text" autocomplete="off" placeholder="氏名を入力" />
             <small v-if="submitted && !form.name.trim()" class="error">氏名を入力してください</small>
           </label>
 
