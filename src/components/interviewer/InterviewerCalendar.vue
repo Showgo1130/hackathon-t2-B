@@ -47,14 +47,22 @@ const isBooked = (date, hour) => bookedMap.has(keyOf(date, hour))
 const bookedCount = computed(() => bookedMap.size)
 
 const onAvailabilityData = (rows) => applyRows(rows)
-const onAvailabilityUpdated = (rows) => applyRows(rows)
-const onAvailabilityCleared = (cells) => clearCells(cells)
+const onAvailabilityUpdated = (rows) => {
+  applyRows(rows)
+  countResponse()
+}
+const onAvailabilityCleared = (cells) => {
+  clearCells(cells)
+  countResponse()
+}
+const onAppError = ({ message }) => failSave(message ?? "保存に失敗しました")
 
 onMounted(() => {
   socket.on("availabilityData", onAvailabilityData)
   socket.on("availabilityUpdated", onAvailabilityUpdated)
   socket.on("availabilityCleared", onAvailabilityCleared)
   socket.on("scheduleData", onScheduleData)
+  socket.on("appError", onAppError)
   loadAvailability()
   socket.emit("loadSchedules")
 })
@@ -63,6 +71,8 @@ onUnmounted(() => {
   socket.off("availabilityUpdated", onAvailabilityUpdated)
   socket.off("availabilityCleared", onAvailabilityCleared)
   socket.off("scheduleData", onScheduleData)
+  socket.off("appError", onAppError)
+  window.clearTimeout(saveTimer)
 })
 
 const shiftWindow = (days) => {
@@ -150,36 +160,60 @@ const openConfirm = () => {
   confirmOpen.value = true
 }
 
+const savedNotice = ref(false)
+const saveError = ref("")
+
+// サーバーの応答を数えて、全部返ってきたら保存完了とする
+let awaitingResponses = 0
+let saveTimer = null
+
+const finishSave = () => {
+  awaitingResponses = 0
+  window.clearTimeout(saveTimer)
+  isSaving.value = false
+  draftMap.clear()
+  savedNotice.value = true
+  window.setTimeout(() => (savedNotice.value = false), 2600)
+}
+
+const failSave = (message) => {
+  awaitingResponses = 0
+  window.clearTimeout(saveTimer)
+  isSaving.value = false
+  saveError.value = message
+}
+
+// 保存の応答が来たら1つ消し込む。下書きは全部返ってくるまで残す
+const countResponse = () => {
+  if (awaitingResponses === 0) return
+  awaitingResponses -= 1
+  if (awaitingResponses === 0) finishSave()
+}
+
 const save = () => {
   const groups = [
     { value: true, cells: pendingCells.value.filter((c) => c.value === true) },
     { value: false, cells: pendingCells.value.filter((c) => c.value === false) },
     { value: null, cells: pendingCells.value.filter((c) => c.value === null) },
-  ]
+  ].filter((g) => g.cells.length > 0)
 
+  saveError.value = ""
   isSaving.value = true
+  confirmOpen.value = false
+  awaitingResponses = groups.length
+
   for (const group of groups) {
-    if (group.cells.length === 0) continue
     socket.emit("setAvailability", {
       cells: group.cells.map(({ slotDate, slotHour }) => ({ slotDate, slotHour })),
       isAvailable: group.value,
     })
   }
 
-  // 送信済みの下書きは、サーバーからの反映を待たずに手元でも確定させる
-  pendingCells.value.forEach(({ key, slotDate, slotHour, value }) => {
-    if (value === null) availabilityMap.delete(key)
-    else availabilityMap.set(keyOf(slotDate, slotHour), value)
-  })
-  draftMap.clear()
-
-  confirmOpen.value = false
-  isSaving.value = false
-  savedNotice.value = true
-  window.setTimeout(() => (savedNotice.value = false), 2600)
+  saveTimer = window.setTimeout(
+    () => failSave("保存の応答がありませんでした。通信状況を確認して、もう一度お試しください"),
+    10000
+  )
 }
-
-const savedNotice = ref(false)
 
 // 未保存のまま離れてしまうのを防ぐ
 const warnBeforeUnload = (event) => {
@@ -212,12 +246,19 @@ onBeforeRouteLeave(() => {
 
       <div class="edit-bar__spacer"></div>
 
-      <span v-if="pendingCount > 0" class="pending-badge">未保存 {{ pendingCount }}件</span>
+      <span v-if="isSaving" class="saving-badge">保存中...</span>
+      <span v-else-if="pendingCount > 0" class="pending-badge">未保存 {{ pendingCount }}件</span>
       <span v-else-if="savedNotice" class="saved-badge">保存しました</span>
 
-      <v-btn size="small" variant="text" :disabled="pendingCount === 0" @click="discardDraft">破棄する</v-btn>
-      <v-btn size="small" color="primary" :disabled="pendingCount === 0" @click="openConfirm">保存する</v-btn>
+      <v-btn size="small" variant="text" :disabled="pendingCount === 0 || isSaving" @click="discardDraft">破棄する</v-btn>
+      <v-btn size="small" color="primary" :disabled="pendingCount === 0" :loading="isSaving" @click="openConfirm">
+        保存する
+      </v-btn>
     </div>
+
+    <v-alert v-if="saveError" type="error" density="compact" class="mb-3" closable @click:close="saveError = ''">
+      {{ saveError }}（変更は未保存のまま残しています）
+    </v-alert>
 
     <p v-if="bookedCount > 0" class="booked-note">
       確定した面接が {{ bookedCount }} 件あります。その枠は「面」と表示され、変更できません。
@@ -293,6 +334,14 @@ onBeforeRouteLeave(() => {
   background: #fdf1e0;
   padding: 4px 12px;
   color: #c2740a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.saving-badge {
+  border-radius: 999px;
+  background: #eef1f6;
+  padding: 4px 12px;
+  color: #42506a;
   font-size: 12px;
   font-weight: 700;
 }
