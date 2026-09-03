@@ -81,6 +81,7 @@ const createUser = async (user) => {
       role: result.role,
       roleLabel: user.roleLabel,
       createdAt: new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(result.createdAt))
+    })
     dialogOpen.value = false
     toast.value = `${result.name}さんの${user.roleLabel}アカウントを作成しました`
     window.setTimeout(() => { toast.value = "" }, 2800)
