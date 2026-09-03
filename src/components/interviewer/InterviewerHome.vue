@@ -5,6 +5,7 @@ import socketManager from "../../socketManager.js"
 import { clearSession } from "../../session.js"
 import InterviewerCalendar from "./InterviewerCalendar.vue"
 import InterviewerChat from "./InterviewerChat.vue"
+import InterviewerSchedule from "./InterviewerSchedule.vue"
 
 const session = inject("session")
 const router = useRouter()
@@ -27,10 +28,12 @@ const logout = () => {
     <v-tabs v-model="tab" color="primary" class="mb-4">
       <v-tab value="chat">通知・チャット</v-tab>
       <v-tab value="calendar">空き予定登録</v-tab>
+      <v-tab value="schedule">予定一覧</v-tab>
     </v-tabs>
 
     <InterviewerChat v-if="tab === 'chat'" />
-    <InterviewerCalendar v-else />
+    <InterviewerCalendar v-else-if="tab === 'calendar'" />
+    <InterviewerSchedule v-else />
   </div>
 </template>
 

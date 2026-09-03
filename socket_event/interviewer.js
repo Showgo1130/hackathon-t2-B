@@ -1,6 +1,8 @@
 import { conversationsRepo } from "../server/repositories/conversations.js"
 import { messagesRepo } from "../server/repositories/messages.js"
 import { availabilityRepo } from "../server/repositories/availability.js"
+import { interviewRequestsRepo } from "../server/repositories/interviewRequests.js"
+import { interviewersRepo } from "../server/repositories/interviewers.js"
 import { answerAvailability } from "../server/matching.js"
 
 const roomOf = (conversationId) => `conv:${conversationId}`
@@ -89,4 +91,37 @@ export default async (io, socket) => {
     const row = await availabilityRepo.upsert({ interviewerId, slotDate, slotHour, isAvailable })
     socket.emit("availabilityUpdated", row)
   })
+
+  // 予定一覧：照合と承認で確定した面接を返す
+  const sendSchedules = async () => {
+    const [confirmed, interviewers] = await Promise.all([
+      interviewRequestsRepo.listConfirmed(),
+      interviewersRepo.list(),
+    ])
+    const nameOf = new Map(interviewers.map((i) => [i.id, i.name]))
+
+    // 同じ学生への確定済み面接を日時順に数えて「何次面接」を決める
+    const roundCounter = new Map()
+    const schedules = []
+    for (const request of confirmed) {
+      const round = (roundCounter.get(request.student_id) ?? 0) + 1
+      roundCounter.set(request.student_id, round)
+      if (!request.interviewer_ids.includes(interviewerId)) continue
+
+      schedules.push({
+        id: request.id,
+        studentName: request.students?.name ?? "（学生）",
+        round,
+        confirmedDate: request.confirmed_date,
+        confirmedHour: request.confirmed_hour,
+        attendees: [
+          request.students?.name ?? "（学生）",
+          ...request.interviewer_ids.map((id) => nameOf.get(id)).filter(Boolean),
+        ],
+      })
+    }
+    socket.emit("scheduleData", schedules)
+  }
+
+  socket.on("loadSchedules", sendSchedules)
 }
