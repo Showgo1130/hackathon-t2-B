@@ -20,7 +20,7 @@ export const studentsRepo = {
       .from("students")
       .update({ selection_status: status })
       .eq("id", id)
-      .select()
+      .select("id, selection_status")
       .single()
     if (error) throw error
     return data
