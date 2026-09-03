@@ -6,7 +6,10 @@ const props = defineProps({
   rangeEnd: { type: String, required: true },
   hours: { type: Array, default: () => [9, 10, 11, 12, 13, 14, 15, 16, 17] },
   readonly: { type: Boolean, default: false }, // HR views this component as readonly if needed
-  submittedSlots: { type: Array, default: () => [] } // 提出済み { slotDate, slotHour } の一覧（readonly時の表示用）
+  submittedSlots: { type: Array, default: () => [] }, // 提出済み { slotDate, slotHour } の一覧（readonly時の表示用）
+  heading: { type: String, default: "面接可能な時間帯を選択" }, // 空文字で見出しを隠せる
+  lockedNotice: { type: String, default: "送信済みの希望日時です（変更できません）" },
+  showHourSection: { type: Boolean, default: true } // 人事側など、時間帯の選択欄が不要な場合に false
 })
 
 const emit = defineEmits(["submit"])
@@ -150,22 +153,25 @@ const isDateInRange = (dateStr) => {
   return dateSet.value.has(dateStr)
 }
 
-const hasSelection = (dateStr) => {
-  if (!dateStr) return false
-  return props.hours.some(h => selection.has(keyOf(dateStr, h)))
-}
+// 候補のある日を塗るための集合（hours の既定値に無い時刻でも取りこぼさない）
+const datesWithSelection = computed(() => {
+  const dates = new Set()
+  selection.forEach((key) => dates.add(key.slice(0, key.lastIndexOf("_"))))
+  return dates
+})
+const hasSelection = (dateStr) => !!dateStr && datesWithSelection.value.has(dateStr)
 </script>
 
 <template>
   <div class="calendar-card">
-    <div class="calendar-title">
-      面接可能な時間帯を選択
+    <div v-if="heading" class="calendar-title">
+      {{ heading }}
     </div>
     <div class="calendar-range mb-3">
       対象期間: {{ rangeStart }} 〜 {{ rangeEnd }}
     </div>
-    <div v-if="readonly" class="calendar-locked mb-3">
-      送信済みの希望日時です（変更できません）
+    <div v-if="readonly && lockedNotice" class="calendar-locked mb-3">
+      {{ lockedNotice }}
     </div>
 
     <div class="calendar-body">
@@ -205,7 +211,7 @@ const hasSelection = (dateStr) => {
       </div>
 
       <!-- Time slots for selected day -->
-      <div class="calendar-side">
+      <div v-if="showHourSection" class="calendar-side">
         <div v-if="selectedDate" class="time-selection-area">
           <div class="d-flex align-center justify-space-between mb-3">
             <div class="time-title">
