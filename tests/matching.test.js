@@ -30,6 +30,8 @@ const slotStatus = async (requestId, { slotDate, slotHour }) =>
 
 const conversationOf = (interviewerId) =>
   db.conversations.find((c) => c.kind === "interviewer" && c.interviewer_id === interviewerId).id
+const conversationOfStudent = (studentId) =>
+  db.conversations.find((c) => c.kind === "student" && c.student_id === studentId).id
 
 const reload = (requestId) => interviewRequestsRepo.findById(requestId)
 
@@ -585,5 +587,182 @@ describe("複数の学生へ同時に送ったときの照合", () => {
 
     assert.equal(await slotStatus("request-2", SLOT_A), "rejected")
     assert.equal((await reload("request-2")).status, "awaiting_student")
+  })
+})
+
+describe("ダブルブッキング防止（重点確認）", () => {
+  // 同じ面接官の集合に対して、2件目の依頼を用意する
+  const addRequest = (id, name, interviewers, hrId, requiredInterviewerCount, student = null) => {
+    const target = student ?? seedRow("students", { name, email: `${name}@example.com` })
+    const request = seedRow("interview_requests", {
+      id,
+      student_id: target.id,
+      hr_id: hrId,
+      interviewer_ids: interviewers.map((i) => i.id),
+      range_start: "2026-09-07",
+      range_end: "2026-09-20",
+      status: "awaiting_student",
+    })
+    seedRow("conversations", { kind: "student", student_id: target.id, hr_id: hrId })
+    seedRow("messages", {
+      conversation_id: "calendar-holder",
+      msg_type: "calendar_request",
+      request_id: id,
+      payload: { requiredInterviewerCount },
+    })
+    return { student: target, request }
+  }
+
+  const approve = (io, requestId, interviewerId, slot) =>
+    matching.respondToMatchApproval(io, { interviewerId, requestId, ...slot, approved: true })
+
+  it("承認依頼が2件同時に出ていても、先に確定した枠は後から二重に埋まらない", async () => {
+    const { request, interviewers, hr } = await setupRequest({ interviewerCount: 1, requiredInterviewerCount: 1 })
+    setAvailability(interviewers[0].id, SLOT_A.slotDate, SLOT_A.slotHour, true)
+    const second = addRequest("request-2", "学生2", interviewers, hr.id, 1)
+    const io = makeIo()
+
+    // 2件とも「空いている」と判定され、承認依頼が出た状態にする
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A])
+    assert.equal(await slotStatus(request.id, SLOT_A), "available_confirmed")
+    assert.equal(await slotStatus("request-2", SLOT_A), "available_confirmed")
+
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+    assert.equal((await reload(request.id)).status, "confirmed")
+
+    // ここで2件目も承認してしまうと、同じ面接官の同じ時間が二重に埋まる
+    await approve(io, "request-2", interviewers[0].id, SLOT_A)
+
+    assert.notEqual(
+      (await reload("request-2")).status,
+      "confirmed",
+      "同じ面接官・同じ日時の面接が2件確定してしまっている"
+    )
+  })
+
+  it("枠が先に埋まったら、その依頼は次の候補日時へ回る", async () => {
+    const { request, interviewers, hr } = await setupRequest({ interviewerCount: 1, requiredInterviewerCount: 1 })
+    setAvailability(interviewers[0].id, SLOT_A.slotDate, SLOT_A.slotHour, true)
+    setAvailability(interviewers[0].id, SLOT_B.slotDate, SLOT_B.slotHour, true)
+    addRequest("request-2", "学生2", interviewers, hr.id, 1)
+    const io = makeIo()
+
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    // 2件目は第1候補が同じ、第2候補は別の日時
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A, SLOT_B])
+
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+    io.emitted.length = 0
+    await approve(io, "request-2", interviewers[0].id, SLOT_A)
+
+    assert.equal(await slotStatus("request-2", SLOT_A), "rejected")
+    // 取り下げたことを面接官に伝えたうえで、次の候補の承認依頼を出す
+    const cancels = io.messages().filter((m) => m.payload?.kind === "match_approval_cancelled")
+    assert.equal(cancels.length, 1)
+    assert.match(cancels[0].body, /別の面接が入った/)
+    const nextApproval = io.messages().find((m) => m.payload?.kind === "match_approval")
+    assert.equal(nextApproval.payload.slotDate, SLOT_B.slotDate)
+    assert.equal(await slotStatus("request-2", SLOT_B), "available_confirmed")
+  })
+
+  it("次の候補も無ければ、学生に追加の候補提出を依頼する", async () => {
+    const { request, interviewers, hr } = await setupRequest({ interviewerCount: 1, requiredInterviewerCount: 1 })
+    setAvailability(interviewers[0].id, SLOT_A.slotDate, SLOT_A.slotHour, true)
+    const second = addRequest("request-2", "学生2", interviewers, hr.id, 1)
+    const io = makeIo()
+
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A])
+
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+    io.emitted.length = 0
+    await approve(io, "request-2", interviewers[0].id, SLOT_A)
+
+    assert.equal((await reload("request-2")).status, "awaiting_student")
+    const followUp = io
+      .messages()
+      .find((m) => m.msg_type === "calendar_request" && m.request_id === "request-2")
+    assert.ok(followUp, "候補が尽きたので学生に選び直しを依頼する")
+    assert.equal(followUp.conversation_id, conversationOfStudent(second.student.id))
+  })
+
+  it("必要2名のうち1名が別件で埋まっていると、その枠では成立しない", async () => {
+    const { request, interviewers, hr } = await setupRequest({ interviewerCount: 2, requiredInterviewerCount: 1 })
+    interviewers.forEach((i) => setAvailability(i.id, SLOT_A.slotDate, SLOT_A.slotHour, true))
+    const io = makeIo()
+
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+    assert.deepEqual((await reload(request.id)).interviewer_ids, [interviewers[0].id])
+
+    // 2件目は必要2名。面接官1は同じ時間に埋まっているので足りない
+    addRequest("request-2", "学生2", interviewers, hr.id, 2)
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A])
+
+    assert.equal(await slotStatus("request-2", SLOT_A), "rejected")
+  })
+
+  it("埋まっていない面接官だけで必要人数を満たせれば成立する", async () => {
+    const { request, interviewers, hr } = await setupRequest({ interviewerCount: 3, requiredInterviewerCount: 1 })
+    interviewers.forEach((i) => setAvailability(i.id, SLOT_A.slotDate, SLOT_A.slotHour, true))
+    const io = makeIo()
+
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+
+    addRequest("request-2", "学生2", interviewers, hr.id, 2)
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A])
+
+    // 面接官2・3が空いているので、必要2名でも成立して承認待ちに進む
+    assert.equal(await slotStatus("request-2", SLOT_A), "available_confirmed")
+    const approvals = io.messages().filter((m) => m.payload?.kind === "match_approval" && m.request_id === "request-2")
+    assert.deepEqual(
+      approvals.map((m) => m.conversation_id).sort(),
+      [conversationOf(interviewers[1].id), conversationOf(interviewers[2].id)].sort(),
+      "埋まっている面接官には承認依頼を出さない"
+    )
+  })
+
+  it("同じ学生の面接を、同じ日時に二重に入れない", async () => {
+    const { request, interviewers, hr, student } = await setupRequest({
+      interviewerCount: 2,
+      requiredInterviewerCount: 1,
+    })
+    interviewers.forEach((i) => setAvailability(i.id, SLOT_A.slotDate, SLOT_A.slotHour, true))
+    const io = makeIo()
+
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+
+    // 同じ学生に、同じ時間帯で別の面接（次の選考など）を回す
+    addRequest("request-2", "同一学生の2件目", interviewers, hr.id, 1, student)
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A])
+    await approve(io, "request-2", interviewers[1].id, SLOT_A)
+
+    assert.notEqual(
+      (await reload("request-2")).status,
+      "confirmed",
+      "同じ学生が同じ日時に2件の面接を持ってしまっている"
+    )
+  })
+
+  it("面接官が空きを取り消しても、確定済みの予定は別依頼の候補にならない", async () => {
+    const { request, interviewers, hr } = await setupRequest({ interviewerCount: 1, requiredInterviewerCount: 1 })
+    setAvailability(interviewers[0].id, SLOT_A.slotDate, SLOT_A.slotHour, true)
+    const io = makeIo()
+
+    await matching.submitStudentSlots(io, request, [SLOT_A])
+    await approve(io, request.id, interviewers[0].id, SLOT_A)
+
+    addRequest("request-2", "学生2", interviewers, hr.id, 1)
+    await matching.submitStudentSlots(io, await reload("request-2"), [SLOT_A])
+
+    assert.equal(await slotStatus("request-2", SLOT_A), "rejected")
+    assert.equal(
+      io.messages().filter((m) => m.msg_type === "availability_check" && m.request_id === "request-2").length,
+      0,
+      "埋まっている面接官に空き確認を送らない"
+    )
   })
 })

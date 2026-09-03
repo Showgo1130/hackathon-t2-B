@@ -103,11 +103,14 @@ class Query {
 
   #rows() {
     let rows = db[this.table].filter((row) => this.#matches(row))
-    for (const { column, ascending } of this.orders) {
-      // 後から指定した order ほど優先度が低くなるよう、安定ソートを逆順に重ねる
+    if (this.orders.length) {
+      // Supabase と同じく、先に指定した order ほど優先度が高い
       rows = [...rows].sort((a, b) => {
-        if (a[column] === b[column]) return 0
-        return (a[column] > b[column] ? 1 : -1) * (ascending ? 1 : -1)
+        for (const { column, ascending } of this.orders) {
+          if (a[column] === b[column]) continue
+          return (a[column] > b[column] ? 1 : -1) * (ascending ? 1 : -1)
+        }
+        return 0
       })
     }
     if (this.limitCount !== null) rows = rows.slice(0, this.limitCount)
