@@ -131,7 +131,12 @@ const copyZoomUrl = async () => {
       :key="item.id"
       class="mb-3 schedule-card"
       variant="outlined"
+      role="button"
+      tabindex="0"
+      :aria-label="`${item.studentName} ${roundLabel(item.round)} ${formatRange(item)} の詳細を開く`"
       @click="openDetail(item)"
+      @keydown.enter.prevent="openDetail(item)"
+      @keydown.space.prevent="openDetail(item)"
     >
       <div class="d-flex align-center pa-4 ga-4">
         <v-avatar color="primary" size="44">
@@ -241,9 +246,14 @@ const copyZoomUrl = async () => {
   cursor: pointer;
   transition: box-shadow .15s ease, border-color .15s ease;
 }
-.schedule-card:hover {
+.schedule-card:hover,
+.schedule-card:focus-visible {
   border-color: #b9d2ff;
   box-shadow: 0 2px 10px rgb(23 105 255 / 12%);
+}
+.schedule-card:focus-visible {
+  outline: 2px solid #1769ff;
+  outline-offset: 2px;
 }
 
 .detail-row {
