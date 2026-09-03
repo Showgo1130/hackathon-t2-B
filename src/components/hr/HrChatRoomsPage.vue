@@ -7,7 +7,6 @@ import HrIcon from "./ui/HrIcon.vue"
 const search = ref("")
 const activeRole = ref("all")
 const students = ref([])
-const interviewers = ref([])
 const requests = ref([])
 const loading = ref(true)
 const getSocket = () => { try { return socketManager.getInstance() } catch { return socketManager.connect(session.value.token) } }
@@ -16,12 +15,10 @@ const socket = getSocket()
 const roleOptions = [
   { value: "all", label: "すべて", icon: "chat" },
   { value: "student", label: "学生", icon: "student" },
-  { value: "interviewer", label: "面接官", icon: "briefcase" },
 ]
 
 const roleMeta = {
   student: { label: "学生", description: "選考中の候補者", icon: "student" },
-  interviewer: { label: "面接官", description: "面接を担当するメンバー", icon: "briefcase" },
 }
 
 const selectionLabels = { first_interview: "一次面接", second_interview: "二次面接", final_interview: "最終面接", offered: "内定", rejected: "不採用" }
@@ -32,7 +29,6 @@ const hrChatRooms = computed(() => [
     const request = latestRequest(student.id)
     return { id: student.id, role: "student", name: student.name, detail: student.email, roleLabel: "学生", status: selectionLabels[student.selection_status] ?? student.selection_status, lastMessage: request ? requestLabels[request.status] ?? request.status : "日程調整は未送信です", time: request ? new Date(request.updated_at).toLocaleDateString("ja-JP") : "", unread: 0 }
   }),
-  ...interviewers.value.map((item) => ({ id: item.id, role: "interviewer", name: item.name, detail: item.email, roleLabel: "面接官", status: "面接官", lastMessage: "トークルームを開く", time: "", unread: 0 })),
 ])
 
 const filteredRooms = computed(() => {
@@ -45,18 +41,18 @@ const filteredRooms = computed(() => {
 })
 
 const pageSize = 10
-const rolePages = reactive({ student: 1, interviewer: 1 })
+const rolePages = reactive({ student: 1 })
 const roomsForRole = (role) => filteredRooms.value.filter((room) => room.role === role)
 const roleTotalPages = (role) => Math.max(1, Math.ceil(roomsForRole(role).length / pageSize))
 const paginatedRoomsForRole = (role) => roomsForRole(role).slice((rolePages[role] - 1) * pageSize, rolePages[role] * pageSize)
-watch([search, activeRole], () => { rolePages.student = 1; rolePages.interviewer = 1 })
+watch([search, activeRole], () => { rolePages.student = 1 })
 
-const roomGroups = computed(() => ["student", "interviewer"]
+const roomGroups = computed(() => ["student"]
   .map((role) => ({ role, ...roleMeta[role], rooms: paginatedRoomsForRole(role), total: roomsForRole(role).length }))
   .filter((group) => group.total))
 
 const roleCount = (role) => role === "all" ? hrChatRooms.value.length : hrChatRooms.value.filter((room) => room.role === role).length
-const onDashboard = (data) => { students.value = data.students ?? []; interviewers.value = data.interviewers ?? []; requests.value = data.requests ?? []; loading.value = false }
+const onDashboard = (data) => { students.value = data.students ?? []; requests.value = data.requests ?? []; loading.value = false }
 onMounted(() => { socket.on("dashboardData", onDashboard); socket.emit("loadDashboard") })
 onUnmounted(() => socket.off("dashboardData", onDashboard))
 </script>

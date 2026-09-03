@@ -58,6 +58,7 @@ const router = createRouter({
           path: "chat/:role/:id",
           name: "hr-chat-room",
           component: HrChatPage,
+          beforeEnter: (to) => to.params.role === "student" ? true : { name: "hr-chat" },
         },
         {
           path: "schedules/new",
