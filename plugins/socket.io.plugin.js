@@ -1,5 +1,5 @@
 import { Server } from "socket.io"
-import { ROLES, verifyPassword, issueToken, verifyToken } from "../server/auth.js"
+import { ROLES, hashPassword, verifyPassword, issueToken, verifyToken } from "../server/auth.js"
 import { studentsRepo } from "../server/repositories/students.js"
 import { interviewersRepo } from "../server/repositories/interviewers.js"
 import { hrStaffRepo } from "../server/repositories/hrStaff.js"
@@ -57,11 +57,58 @@ const handleLogin = async (req, res) => {
   sendJson(res, 200, { token, id: account.id, role, name: account.name })
 }
 
+const handleCreateUser = async (req, res) => {
+  const authorization = req.headers.authorization ?? ""
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
+  const requester = token ? verifyToken(token) : null
+
+  if (!requester) return sendJson(res, 401, { error: "unauthorized" })
+  if (requester.role !== "hr") return sendJson(res, 403, { error: "forbidden" })
+
+  let payload
+  try {
+    payload = await readJsonBody(req)
+  } catch {
+    return sendJson(res, 400, { error: "invalid_json" })
+  }
+
+  const role = payload.role
+  const name = typeof payload.name === "string" ? payload.name.trim() : ""
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : ""
+  const password = typeof payload.password === "string" ? payload.password : ""
+
+  if (!ROLES.includes(role) || !name || !email || password.length < 8) {
+    return sendJson(res, 400, { error: "invalid_fields" })
+  }
+
+  const repo = reposByRole[role]
+  const existing = await repo.findByEmail(email)
+  if (existing) return sendJson(res, 409, { error: "email_already_exists" })
+
+  const passwordHash = await hashPassword(password)
+  const account = await repo.create({ name, email, passwordHash })
+
+  sendJson(res, 201, {
+    id: account.id,
+    role,
+    name: account.name,
+    email: account.email,
+    createdAt: account.created_at,
+  })
+}
+
 const attachApiRoutes = (server) => {
   server.middlewares.use((req, res, next) => {
     if (req.method === "POST" && req.url === "/api/login") {
       handleLogin(req, res).catch((err) => {
         console.error("[api/login] error", err)
+        sendJson(res, 500, { error: "internal_error" })
+      })
+      return
+    }
+    if (req.method === "POST" && req.url === "/api/users") {
+      handleCreateUser(req, res).catch((err) => {
+        console.error("[api/users] error", err)
         sendJson(res, 500, { error: "internal_error" })
       })
       return
