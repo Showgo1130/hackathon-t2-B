@@ -148,8 +148,17 @@ export default async (io, socket) => {
 
   socket.on("loadSchedules", safe(sendSchedules))
 
+  // 通知の履歴。接続時に自動で送るが、購読を始めるのが遅れて取りこぼした
+  // クライアントからも取り直せるようにしておく
+  const sendInit = async () => {
+    const conversation = await conversationPromise
+    const history = await messagesRepo.listForConversation(conversation.id)
+    socket.emit("init", { conversationId: conversation.id, messages: history })
+  }
+
+  socket.on("loadInit", safe(sendInit))
+
   const conversation = await conversationPromise
   socket.join(roomOf(conversation.id))
-  const history = await messagesRepo.listForConversation(conversation.id)
-  socket.emit("init", { conversationId: conversation.id, messages: history })
+  await sendInit()
 }
