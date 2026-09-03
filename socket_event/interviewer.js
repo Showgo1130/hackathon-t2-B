@@ -19,14 +19,14 @@ const parseYesNo = (text) => {
 // 未回答のavailability_checkのうち最新のものを探す（チャット直接返信の対象を特定する）
 const findUnansweredCheck = async (conversationId) => {
   const history = await messagesRepo.listForConversation(conversationId)
+  // 同じ日時が別の依頼で来ることがあるため、依頼IDまで含めてキーにする
+  const keyOf = (m) => `${m.request_id}_${m.payload.slotDate}_${m.payload.slotHour}`
   const answeredKeys = new Set(
-    history
-      .filter((m) => m.msg_type === "availability_answer")
-      .map((m) => `${m.payload.slotDate}_${m.payload.slotHour}`)
+    history.filter((m) => m.msg_type === "availability_answer").map(keyOf)
   )
   const checks = history.filter((m) => m.msg_type === "availability_check")
   for (let i = checks.length - 1; i >= 0; i -= 1) {
-    const key = `${checks[i].payload.slotDate}_${checks[i].payload.slotHour}`
+    const key = keyOf(checks[i])
     if (!answeredKeys.has(key)) return checks[i]
   }
   return null

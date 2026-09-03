@@ -71,6 +71,11 @@ const endDrag = () => {
   if (cells.length > 0) emit("cellsSelect", { cells })
 }
 
+// キーボード操作（Enter / Space）では単セルの選択として通知する
+const selectCell = (dateIdx, hourIdx) => {
+  emit("cellsSelect", { cells: [{ date: dates.value[dateIdx], hour: props.hours[hourIdx] }] })
+}
+
 const startDrag = (dateIdx, hourIdx, event) => {
   event.preventDefault() // ドラッグ中のテキスト選択を抑止する
   dragAnchor.value = { dateIdx, hourIdx }
@@ -119,6 +124,8 @@ const selectAll = () =>
               :class="[cellState(date, hour), { dragging: inDragRect(dateIdx, hourIdx) }]"
               @mousedown="startDrag(dateIdx, hourIdx, $event)"
               @mouseenter="extendDrag(dateIdx, hourIdx)"
+              @keydown.enter.prevent="selectCell(dateIdx, hourIdx)"
+              @keydown.space.prevent="selectCell(dateIdx, hourIdx)"
             >
               {{ cellLabel(date, hour) }}
             </button>

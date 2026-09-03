@@ -15,8 +15,15 @@ const selection = reactive(new Set())
 
 // 同じ依頼に対して候補の追加を求められることがあるため、提出済みかどうかは
 // request_id ではなく「その依頼メッセージより後に提出があるか」で判定する
+const findLastIndexOf = (list, predicate) => {
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (predicate(list[i])) return i
+  }
+  return -1
+}
+
 const pendingCalendarRequest = computed(() => {
-  const lastRequestIndex = messages.findLastIndex((m) => m.msg_type === "calendar_request")
+  const lastRequestIndex = findLastIndexOf(messages, (m) => m.msg_type === "calendar_request")
   if (lastRequestIndex === -1) return null
   const submittedAfter = messages
     .slice(lastRequestIndex + 1)
