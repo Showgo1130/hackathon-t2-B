@@ -18,7 +18,14 @@ defineProps({
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <template v-if="name === 'calendar'">
+    <template v-if="name === 'dashboard'">
+      <rect x="3" y="3" width="7" height="9" rx="1.5" />
+      <rect x="14" y="3" width="7" height="5" rx="1.5" />
+      <rect x="14" y="12" width="7" height="9" rx="1.5" />
+      <rect x="3" y="16" width="7" height="5" rx="1.5" />
+    </template>
+
+    <template v-else-if="name === 'calendar'">
       <rect x="3" y="5" width="18" height="16" rx="2" />
       <path d="M16 3v4M8 3v4M3 10h18" />
       <path d="M8 14h3v3H8z" />

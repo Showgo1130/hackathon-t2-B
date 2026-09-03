@@ -1,15 +1,9 @@
 <script setup>
 import { computed, ref } from "vue"
-import { session } from "../../session.js"
-import HrCreateUserDialog from "./HrCreateUserDialog.vue"
 import HrIcon from "./ui/HrIcon.vue"
 
-const dialogOpen = ref(false)
 const activeRole = ref("all")
 const searchQuery = ref("")
-const toast = ref("")
-const isCreating = ref(false)
-const createError = ref("")
 
 const users = ref([
   { id: 1, name: "田中 太郎", email: "student1@example.com", role: "student", roleLabel: "学生", organization: "青山大学", status: "active", createdAt: "2026/09/01" },
@@ -41,57 +35,6 @@ const summary = computed(() => ({
   hr: users.value.filter((user) => user.role === "hr").length,
 }))
 
-const openCreateDialog = () => {
-  createError.value = ""
-  dialogOpen.value = true
-}
-
-const createUser = async (user) => {
-  isCreating.value = true
-  createError.value = ""
-  try {
-    const response = await fetch("/api/users", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.value?.token ?? ""}`,
-      },
-      body: JSON.stringify({
-        role: user.role,
-        name: user.name,
-        email: user.email,
-        password: user.password,
-      }),
-    })
-
-    const result = await response.json()
-    if (!response.ok) {
-      createError.value = result.error === "email_already_exists"
-        ? "このメールアドレスは、選択したユーザー種別ですでに登録されています。"
-        : result.error === "forbidden"
-          ? "ユーザーを作成する権限がありません。"
-          : "ユーザーの作成に失敗しました。入力内容を確認してください。"
-      return
-    }
-
-    users.value.unshift({
-      id: result.id,
-      name: result.name,
-      email: result.email,
-      role: result.role,
-      roleLabel: user.roleLabel,
-      createdAt: new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(result.createdAt))
-    })
-    dialogOpen.value = false
-    toast.value = `${result.name}さんの${user.roleLabel}アカウントを作成しました`
-    window.setTimeout(() => { toast.value = "" }, 2800)
-  } catch {
-    createError.value = "サーバーに接続できませんでした。しばらくしてから再度お試しください。"
-  } finally {
-    isCreating.value = false
-  }
-}
-
 const roleIcon = (role) => role === "student" ? "student" : role === "interviewer" ? "briefcase" : "shield"
 </script>
 
@@ -99,7 +42,6 @@ const roleIcon = (role) => role === "student" ? "student" : role === "interviewe
   <div class="users-page">
     <header class="page-header">
       <div><span class="eyebrow">ACCOUNT MANAGEMENT</span><h1>ユーザー管理</h1><p>採用プロセスに参加するユーザーと権限を管理します。</p></div>
-      <button class="add-button" type="button" @click="openCreateDialog"><HrIcon name="user-plus" :size="18" />ユーザーを作成</button>
     </header>
 
     <aside class="permission-note"><span><HrIcon name="shield" :size="19" /></span><div><strong>人事権限でのみ操作できます</strong><p>学生・面接官・他の人事アカウントを作成できるのは人事ユーザーだけです。</p></div></aside>
@@ -138,8 +80,6 @@ const roleIcon = (role) => role === "student" ? "student" : role === "interviewe
       <footer class="panel-footer">{{ filteredUsers.length }}件を表示</footer>
     </section>
 
-    <Transition name="toast"><div v-if="toast" class="toast"><span><HrIcon name="check" :size="14" /></span>{{ toast }}</div></Transition>
-    <HrCreateUserDialog :open="dialogOpen" :submitting="isCreating" :server-error="createError" @close="dialogOpen = false" @create="createUser" />
   </div>
 </template>
 
