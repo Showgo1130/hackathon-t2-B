@@ -14,11 +14,7 @@ const navItems = [
   { label: "ダッシュボード", icon: "dashboard", route: "hr-dashboard" },
   { label: "チャット", icon: "chat", route: "hr-chat" },
   { label: "日程調整を作成", icon: "calendar", route: "hr-schedule-create" },
-  { label: "送信済み", icon: "calendar", route: "hr-sent" },
-  { label: "候補者一覧", icon: "users", route: "hr-candidates" },
-  { label: "面接官一覧", icon: "briefcase", route: "hr-interviewers" },
   { label: "ユーザー管理", icon: "user-plus", route: "hr-users" },
-  { label: "設定", icon: "settings", route: "hr-settings" },
 ]
 
 const displayName = computed(() => session?.value?.name || "山田 花子")

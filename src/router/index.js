@@ -6,7 +6,6 @@ import HrChatPage from "../components/hr/HrChatPage.vue"
 import HrDashboardPage from "../components/hr/HrDashboardPage.vue"
 import HrChatRoomsPage from "../components/hr/HrChatRoomsPage.vue"
 import HrScheduleCreatePage from "../components/hr/HrScheduleCreatePage.vue"
-import HrSectionPlaceholder from "../components/hr/HrSectionPlaceholder.vue"
 import HrUserManagementPage from "../components/hr/HrUserManagementPage.vue"
 import InterviewerHome from "../components/interviewer/InterviewerHome.vue"
 import { session } from "../session.js"
@@ -62,26 +61,6 @@ const router = createRouter({
           path: "schedules/new",
           name: "hr-schedule-create",
           component: HrScheduleCreatePage,
-        },
-        {
-          path: "sent",
-          name: "hr-sent",
-          component: HrSectionPlaceholder,
-        },
-        {
-          path: "candidates",
-          name: "hr-candidates",
-          component: HrSectionPlaceholder,
-        },
-        {
-          path: "interviewers",
-          name: "hr-interviewers",
-          component: HrSectionPlaceholder,
-        },
-        {
-          path: "settings",
-          name: "hr-settings",
-          component: HrSectionPlaceholder,
         },
         {
           path: "users",
