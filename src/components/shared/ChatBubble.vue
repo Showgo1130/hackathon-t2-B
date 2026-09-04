@@ -92,7 +92,7 @@ defineProps({
 }
 .chat-bubble--system-confirmed {
   width: 100%;
-  max-width: min(94%, 560px);
+  max-width: min(94%, 640px);
   border: 2px solid #1769ff;
   border-radius: 14px;
   padding: 0;
