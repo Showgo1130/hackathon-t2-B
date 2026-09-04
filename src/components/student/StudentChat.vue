@@ -22,6 +22,25 @@ const expandedLogs = reactive(new Set())
 const displayName = computed(() => session?.value?.name ?? session?.name ?? "")
 const avatarInitial = computed(() => displayName.value.slice(0, 1) || "?")
 
+// 面接の共通情報（面接官画面と同じ固定値。予定ごとに変わらないためDBは持たない）
+const MEETING = {
+  format: "オンライン（Zoom）",
+  zoomUrl: "https://zoom.us/j/9876543210?pwd=sample",
+  zoomId: "987 6543 210",
+  zoomPasscode: "123456",
+  note: "開始5分前までにZoomへ入室してください。接続できない場合は人事担当までご連絡ください。",
+}
+const copied = ref(false)
+const copyZoomUrl = async () => {
+  try {
+    await navigator.clipboard.writeText(MEETING.zoomUrl)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    copied.value = false
+  }
+}
+
 // 同じ依頼に対して候補の追加を求められることがあるため、提出済みかどうかは
 // request_id ではなく「その依頼メッセージより後に提出があるか」で判定する
 const findLastIndexOf = (list, predicate) => {
@@ -334,6 +353,34 @@ const onKeydown = (e) => {
                   <div class="confirmed__year">{{ confirmedYear(msg) }}</div>
                   <div class="confirmed__value">{{ confirmedLabel(msg) }}</div>
                   <div class="confirmed__note">当日は時間に余裕をもってご参加ください。</div>
+                </div>
+
+                <div class="confirmed__meeting">
+                  <div class="confirmed__meeting-row">
+                    <span class="confirmed__meeting-label">形式</span>
+                    <span>{{ MEETING.format }}</span>
+                  </div>
+                  <div class="confirmed__meeting-row">
+                    <span class="confirmed__meeting-label">Zoom URL</span>
+                    <span class="confirmed__meeting-link">
+                      <a :href="MEETING.zoomUrl" target="_blank" rel="noopener">{{ MEETING.zoomUrl }}</a>
+                      <button type="button" class="confirmed__copy" @click="copyZoomUrl">
+                        {{ copied ? "コピーしました" : "コピー" }}
+                      </button>
+                    </span>
+                  </div>
+                  <div class="confirmed__meeting-row">
+                    <span class="confirmed__meeting-label">ミーティングID</span>
+                    <span>{{ MEETING.zoomId }}</span>
+                  </div>
+                  <div class="confirmed__meeting-row">
+                    <span class="confirmed__meeting-label">パスコード</span>
+                    <span>{{ MEETING.zoomPasscode }}</span>
+                  </div>
+                  <p class="confirmed__meeting-note">{{ MEETING.note }}</p>
+                  <a :href="MEETING.zoomUrl" target="_blank" rel="noopener" class="confirmed__join-btn">
+                    Zoomに参加する
+                  </a>
                 </div>
               </div>
             </ChatBubble>
@@ -693,6 +740,85 @@ const onKeydown = (e) => {
   margin-top: 10px;
   color: #69758b;
   font-size: 11px;
+}
+
+.confirmed__meeting {
+  margin: 0 20px 20px;
+  border: 1px solid #d6e3fb;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #f4f8ff;
+  text-align: left;
+}
+.confirmed__meeting-row {
+  display: flex;
+  gap: 12px;
+  padding: 6px 0;
+  align-items: baseline;
+}
+.confirmed__meeting-row + .confirmed__meeting-row {
+  border-top: 1px dashed #dbe6fb;
+}
+.confirmed__meeting-label {
+  flex: 0 0 92px;
+  color: #4a6ea8;
+  font-size: 11px;
+  font-weight: 750;
+}
+.confirmed__meeting-row span:not(.confirmed__meeting-label) {
+  overflow-wrap: anywhere;
+  color: #1a2235;
+  font-size: 12px;
+  font-weight: 650;
+}
+.confirmed__meeting-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.confirmed__meeting-link a {
+  color: #1769ff;
+  font-weight: 650;
+  word-break: break-all;
+}
+.confirmed__copy {
+  flex: 0 0 auto;
+  border: 1px solid #b9d2ff;
+  border-radius: 6px;
+  padding: 3px 9px;
+  background: #fff;
+  color: #1769ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+.confirmed__copy:hover {
+  background: #eaf1ff;
+}
+.confirmed__meeting-note {
+  margin: 10px 0 0;
+  color: #69758b;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.confirmed__join-btn {
+  display: block;
+  margin-top: 12px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #1769ff;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: center;
+  text-decoration: none;
+}
+.confirmed__join-btn:hover {
+  background: #0f5ae0;
+  text-decoration: none;
 }
 
 .date-divider {
