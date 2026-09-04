@@ -21,6 +21,10 @@ const isAvailabilityCheck = (msg) => msg.msg_type === "availability_check"
 const answeredKeys = keysOf((m) => m.msg_type === "availability_answer")
 const approvedKeys = keysOf((m) => m.msg_type === "result" && m.payload?.kind === "match_approval_answer")
 const cancelledKeys = keysOf((m) => m.msg_type === "system_notice" && m.payload?.kind === "match_approval_cancelled")
+// 学生が候補を選び直して、この日時の空き確認が不要になったもの
+const withdrawnKeys = keysOf(
+  (m) => m.msg_type === "system_notice" && m.payload?.kind === "availability_check_withdrawn"
+)
 
 // 日程が確定した依頼。残っている空き確認にはもう答えさせない
 const settledRequestIds = computed(
@@ -33,7 +37,9 @@ const settledRequestIds = computed(
 )
 
 export const isCheckOpen = (msg) =>
-  !answeredKeys.value.has(keyOf(msg)) && !settledRequestIds.value.has(msg.request_id)
+  !answeredKeys.value.has(keyOf(msg)) &&
+  !withdrawnKeys.value.has(keyOf(msg)) &&
+  !settledRequestIds.value.has(msg.request_id)
 export const isApprovalOpen = (msg) =>
   !approvedKeys.value.has(keyOf(msg)) && !cancelledKeys.value.has(keyOf(msg))
 

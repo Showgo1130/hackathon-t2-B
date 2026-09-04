@@ -9,6 +9,7 @@ const props = defineProps({
   submittedSlots: { type: Array, default: () => [] }, // 提出済み { slotDate, slotHour } の一覧（readonly時の表示用）
   heading: { type: String, default: "面接可能な時間帯を選択" }, // 空文字で見出しを隠せる
   lockedNotice: { type: String, default: "送信済みの希望日時です（変更できません）" },
+  submitLabel: { type: String, default: "確定して送信" }, // 修正時は「この内容に修正する」などに差し替える
   showHourSection: { type: Boolean, default: true } // 人事側など、時間帯の選択欄が不要な場合に false
 })
 
@@ -217,16 +218,17 @@ const hasSelection = (dateStr) => !!dateStr && datesWithSelection.value.has(date
             <div class="time-title">
               {{ shortDateLabel(selectedDate) }} の時間帯
             </div>
-            <v-checkbox
+            <v-btn
               v-if="!readonly"
-              :model-value="isAllHoursSelectedForCurrent"
-              @update:model-value="toggleAllHoursForCurrent"
-              label="全ての時間帯可能"
-              color="primary"
-              density="compact"
-              hide-details
-              class="flex-grow-0"
-            ></v-checkbox>
+              type="button"
+              :variant="isAllHoursSelectedForCurrent ? 'flat' : 'outlined'"
+              :color="isAllHoursSelectedForCurrent ? 'primary' : 'grey-darken-1'"
+              class="all-hours-btn"
+              size="small"
+              @click="toggleAllHoursForCurrent(!isAllHoursSelectedForCurrent)"
+            >
+              全ての時間帯可能
+            </v-btn>
           </div>
 
           <div class="hour-grid">
@@ -262,7 +264,7 @@ const hasSelection = (dateStr) => !!dateStr && datesWithSelection.value.has(date
         :disabled="!canSubmit"
         @click="confirmAndSubmit"
       >
-        確定して送信
+        {{ submitLabel }}
       </v-btn>
     </div>
   </div>
@@ -342,6 +344,10 @@ const hasSelection = (dateStr) => !!dateStr && datesWithSelection.value.has(date
 }
 .hour-btn {
   min-width: 78px;
+}
+/* 「全ての時間帯可能」も時間帯と同じボタン見た目にそろえる */
+.all-hours-btn {
+  flex: 0 0 auto;
 }
 /* readonly 時は色を保ったまま操作だけを止める */
 .hour-btn--locked {

@@ -12,6 +12,8 @@ const roomOf = (conversationId) => `conv:${conversationId}`
 const APPROVAL_REQUEST = "match_approval"
 const APPROVAL_ANSWER = "match_approval_answer"
 const APPROVAL_CANCELLED = "match_approval_cancelled"
+// 学生が候補を選び直したことで不要になった空き確認
+const CHECK_WITHDRAWN = "availability_check_withdrawn"
 
 const slotLabel = (slotDate, slotHour) => `${slotDate} ${String(slotHour).padStart(2, "0")}:00`
 const roundLabel = (round) => (round >= 3 ? "最終面接" : `${round}次面接`)
@@ -257,6 +259,11 @@ const sendAvailabilityCheck = async (io, request, interviewerId, slot) => {
 
 // ③ 学生提示の候補スロットと面接官の空き予定を照合する
 export const evaluateRequest = async (io, request) => {
+  await runEvaluation(io, request)
+  await notifyRevisable(io, request)
+}
+
+const runEvaluation = async (io, request) => {
   const slots = await candidateSlotsRepo.listForRequest(request.id)
   // 承認待ちの枠があるうちは再照合しない（承認依頼の二重送信を防ぐ）
   if (slots.some((s) => s.status === "available_confirmed")) return
@@ -309,8 +316,62 @@ export const evaluateRequest = async (io, request) => {
   }
 }
 
-// ② 学生が候補スロットを提出した
+// 学生が出した候補を修正できるのは「面接官の予定と照合される前」まで。
+// 面接官が1件でも可否を答えているか、どれかの候補の照合が進んでいたら修正できない
+export const canReviseSlots = async (request) => {
+  if (!request || request.status !== "matching") return false
+  const slots = await candidateSlotsRepo.listForRequest(request.id)
+  if (slots.length === 0) return false
+  if (slots.some((slot) => slot.status !== "pending_check")) return false
+  for (const slot of slots) {
+    const answers = await collectAnswers(request.interviewer_ids, slot.slot_date, slot.slot_hour)
+    if (Object.values(answers).some((value) => value !== null)) return false
+  }
+  return true
+}
+
+// 修正できる間かどうかを学生の画面に伝える（送信直後は修正可、面接官が答えたら不可になる）
+const notifyRevisable = async (io, request) => {
+  const latest = (await interviewRequestsRepo.findById(request.id)) ?? request
+  const conversation = await conversationsRepo.findOrCreateForStudent(latest.student_id, latest.hr_id)
+  io.to(roomOf(conversation.id)).emit("calendarRevisable", {
+    requestId: latest.id,
+    revisable: await canReviseSlots(latest),
+  })
+}
+
+// 学生が候補から外した日時の空き確認は、面接官側でも閉じる（答えても使われないため）
+const withdrawStaleChecks = async (io, request, slots) => {
+  const kept = new Set(slots.map(({ slotDate, slotHour }) => slotKeyOf(slotDate, Number(slotHour))))
+  for (const interviewerId of request.interviewer_ids) {
+    const conversation = await conversationsRepo.findOrCreateForInterviewer(interviewerId, request.hr_id)
+    const history = await messagesRepo.listForConversation(conversation.id)
+    const mine = history.filter((m) => m.request_id === request.id)
+    const closed = new Set(
+      mine
+        .filter((m) => m.msg_type === "availability_answer" || m.payload?.kind === CHECK_WITHDRAWN)
+        .map((m) => slotKeyOf(m.payload.slotDate, Number(m.payload.slotHour)))
+    )
+    for (const check of mine.filter((m) => m.msg_type === "availability_check")) {
+      const { slotDate, slotHour } = check.payload
+      const key = slotKeyOf(slotDate, Number(slotHour))
+      if (kept.has(key) || closed.has(key)) continue
+      closed.add(key)
+      await postMessage(io, conversation.id, {
+        senderKind: "system",
+        senderId: null,
+        body: `${slotLabel(slotDate, slotHour)} は候補者が候補から外したため、この日時の確認は不要になりました`,
+        msgType: "system_notice",
+        payload: { kind: CHECK_WITHDRAWN, slotDate, slotHour },
+        requestId: request.id,
+      })
+    }
+  }
+}
+
+// ② 学生が候補スロットを提出した（照合前の選び直しも同じ経路を通る）
 export const submitStudentSlots = async (io, request, slots) => {
+  await withdrawStaleChecks(io, request, slots)
   await interviewRequestsRepo.setStatus(request.id, "matching")
   await candidateSlotsRepo.replaceForRequest(request.id, slots)
   await evaluateRequest(io, request)

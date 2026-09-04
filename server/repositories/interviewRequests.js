@@ -95,6 +95,17 @@ export const interviewRequestsRepo = {
     return data
   },
 
+  // ダッシュボード用。人事は誰の依頼でも見えないと、他の人事が送った学生を
+  // 「未送信」と誤認して二重に送ってしまうため、hr_id では絞らない
+  async listAll() {
+    const { data, error } = await supabase
+      .from("interview_requests")
+      .select("*, students(id, name)")
+      .order("updated_at", { ascending: false })
+    if (error) throw error
+    return data
+  },
+
   async listForHr(hrId) {
     const { data, error } = await supabase
       .from("interview_requests")
