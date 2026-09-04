@@ -81,12 +81,13 @@ const confirmSave = () => {
 }
 
 // ---- 日程調整状況（interview_requests から導出。DB変更なし）----
+// 一覧の列に収まるよう、ラベルも補足も短く言い切る
 const SCHEDULE_STATUS_META = {
-  none: { label: "未送信", color: "#64748b", bg: "#eef0f3", icon: "📨", desc: "まだ日程調整を開始していません" },
-  awaiting_student: { label: "候補者回答待ち", color: "#1d63d1", bg: "#e8f0fe", icon: "🧑", desc: "候補者の回答を待っています" },
-  matching: { label: "自動調整中", color: "#c2740a", bg: "#fdf1e0", icon: "🔄", desc: "空き時間を調整しています" },
-  confirmed: { label: "確定済み", color: "#1a8a4c", bg: "#e6f6ec", icon: "✅", desc: "面接日程が確定しています" },
-  cancelled: { label: "自動調整不可", color: "#c62828", bg: "#fdecea", icon: "⚠️", desc: "日程が合いませんでした" },
+  none: { label: "未送信", color: "#64748b", bg: "#eef0f3", icon: "📨", desc: "まだ送っていません" },
+  awaiting_student: { label: "回答待ち", color: "#1d63d1", bg: "#e8f0fe", icon: "🧑", desc: "候補者の回答待ち" },
+  matching: { label: "調整中", color: "#c2740a", bg: "#fdf1e0", icon: "🔄", desc: "空き時間を照合中" },
+  confirmed: { label: "確定済み", color: "#1a8a4c", bg: "#e6f6ec", icon: "✅", desc: "日程が確定済み" },
+  cancelled: { label: "調整不可", color: "#c62828", bg: "#fdecea", icon: "⚠️", desc: "日程が合わず未確定" },
 }
 
 const scheduleStatusKey = (studentId) => requestsByStudent(studentId)[0]?.status ?? "none"
@@ -95,8 +96,12 @@ const scheduleMeta = (studentId) => {
   const [latest] = requestsByStudent(studentId)
   const key = latest?.status ?? "none"
   const meta = SCHEDULE_STATUS_META[key] ?? SCHEDULE_STATUS_META.none
+  // detail は一覧の2行目に出す補足。ラベルの言い換えではなく、確定日時のように
+  // ラベルだけでは分からないことがあるときにだけ持たせる
   if (key === "confirmed" && latest?.confirmed_date && latest?.confirmed_hour != null) {
-    return { ...meta, desc: `${latest.confirmed_date} ${String(latest.confirmed_hour).padStart(2, "0")}:00 に確定` }
+    const [, month, day] = latest.confirmed_date.split("-")
+    const at = `${Number(month)}/${Number(day)} ${String(latest.confirmed_hour).padStart(2, "0")}:00 に確定`
+    return { ...meta, desc: at, detail: at }
   }
   return meta
 }
@@ -131,22 +136,6 @@ const needsNewRequest = (student) => {
   if (activeRequest(student.id)) return false
   return confirmedCount(student.id) < required
 }
-const unsentStudents = computed(() => students.filter((student) => needsNewRequest(student)))
-const unsentSearch = ref("")
-const unsentSelectionFilter = ref("all")
-const unsentPage = ref(1)
-const unsentPageSize = 10
-const filteredUnsentStudents = computed(() => {
-  const query = unsentSearch.value.trim().toLowerCase()
-  return unsentStudents.value.filter((student) =>
-    (unsentSelectionFilter.value === "all" || student.selection_status === unsentSelectionFilter.value)
-    && (!query || student.name.toLowerCase().includes(query) || student.email.toLowerCase().includes(query)))
-})
-const unsentTotalPages = computed(() => Math.max(1, Math.ceil(filteredUnsentStudents.value.length / unsentPageSize)))
-const paginatedUnsentStudents = computed(() => filteredUnsentStudents.value.slice((unsentPage.value - 1) * unsentPageSize, unsentPage.value * unsentPageSize))
-watch([unsentSearch, unsentSelectionFilter], () => { unsentPage.value = 1 })
-watch(unsentTotalPages, (pages) => { if (unsentPage.value > pages) unsentPage.value = pages })
-
 const lastUpdatedAt = (studentId) => {
   const [latest] = requestsByStudent(studentId)
   return latest?.updated_at ?? students.find((s) => s.id === studentId)?.created_at ?? null
@@ -298,14 +287,33 @@ const openGroup = ref(null)
 const toggleGroup = (key) => { openGroup.value = openGroup.value === key ? null : key }
 const TASK_PREVIEW = 5
 const showAllTasks = ref(false)
-watch(openGroup, () => { showAllTasks.value = false })
-const openItems = computed(() => {
-  const group = taskGroups.value.find((item) => item.key === openGroup.value)
-  if (!group) return []
-  return showAllTasks.value ? group.items : group.items.slice(0, TASK_PREVIEW)
+// 「日程調整をまだ送っていません」は人数が多くなりやすいので、選考段階で絞り込めるようにする
+const STAGE_FILTER_GROUP = "unsent"
+const stageFilter = ref("all")
+watch(openGroup, () => { showAllTasks.value = false; stageFilter.value = "all" })
+
+const openGroupData = computed(() => taskGroups.value.find((group) => group.key === openGroup.value) ?? null)
+// 絞り込みの選択肢は、実際にその段階の候補者がいるものだけ出す
+const stageFilterOptions = computed(() => {
+  const group = openGroupData.value
+  if (!group || group.key !== STAGE_FILTER_GROUP) return []
+  const counts = new Map()
+  group.items.forEach((item) => {
+    const status = item.student.selection_status
+    counts.set(status, (counts.get(status) ?? 0) + 1)
+  })
+  return SELECTION_STATUS_OPTIONS.filter((option) => counts.has(option.value))
+    .map((option) => ({ ...option, count: counts.get(option.value) }))
 })
-const openGroupTotal = computed(() =>
-  taskGroups.value.find((group) => group.key === openGroup.value)?.count ?? 0)
+const filteredGroupItems = computed(() => {
+  const group = openGroupData.value
+  if (!group) return []
+  if (group.key !== STAGE_FILTER_GROUP || stageFilter.value === "all") return group.items
+  return group.items.filter((item) => item.student.selection_status === stageFilter.value)
+})
+const openItems = computed(() =>
+  showAllTasks.value ? filteredGroupItems.value : filteredGroupItems.value.slice(0, TASK_PREVIEW))
+const openGroupTotal = computed(() => filteredGroupItems.value.length)
 
 // グループごとの一括導線。個別に開き直さなくても、その作業の場所へ直接入れる
 const runGroup = (group) => {
@@ -314,7 +322,10 @@ const runGroup = (group) => {
     return
   }
   if (group.key === "unsent") {
-    router.push({ name: "hr-schedule-create", query: { students: group.items.map((item) => item.student.id).join(",") } })
+    // 開いて絞り込んでいるときは、表示している人だけを送信対象にする
+    const items = openGroup.value === group.key ? filteredGroupItems.value : group.items
+    if (!items.length) return
+    router.push({ name: "hr-schedule-create", query: { students: items.map((item) => item.student.id).join(",") } })
   }
 }
 
@@ -535,6 +546,29 @@ const toast = ref("")
             </button>
           </div>
 
+          <div v-if="openGroup === group.key && group.key === STAGE_FILTER_GROUP" class="group__filter">
+            <span class="group__filter-label">絞り込み</span>
+            <div class="group__filter-chips" role="group" aria-label="選考段階で絞り込む">
+              <button
+                type="button"
+                class="stage-chip"
+                :class="{ 'stage-chip--on': stageFilter === 'all' }"
+                :aria-pressed="stageFilter === 'all'"
+                @click="stageFilter = 'all'"
+              >すべて<b>{{ group.count }}</b></button>
+              <button
+                v-for="option in stageFilterOptions"
+                :key="option.value"
+                type="button"
+                class="stage-chip"
+                :class="{ 'stage-chip--on': stageFilter === option.value }"
+                :aria-pressed="stageFilter === option.value"
+                @click="stageFilter = option.value"
+              >{{ option.title }}<b>{{ option.count }}</b></button>
+            </div>
+            <span class="group__filter-hint">「{{ group.jump }}」で {{ openGroupTotal }}人 が選ばれた状態で開きます</span>
+          </div>
+
           <ul v-if="openGroup === group.key" class="task-list">
             <li v-for="task in openItems" :key="task.student.id" :class="`task task--${task.tone}`">
               <span class="task__icon">{{ task.icon }}</span>
@@ -559,6 +593,10 @@ const toast = ref("")
               </div>
             </li>
           </ul>
+
+          <p v-if="openGroup === group.key && !openItems.length" class="task-empty">
+            この選考段階に当てはまる候補者はいません。
+          </p>
 
           <button
             v-if="openGroup === group.key && openGroupTotal > TASK_PREVIEW"
@@ -591,7 +629,7 @@ const toast = ref("")
         </div>
 
         <div class="text-subtitle-2 font-weight-medium mb-3 text-medium-emphasis">日程調整状況別 人数</div>
-        <div class="summary-grid mb-6">
+        <div class="summary-grid">
           <button
             v-for="item in scheduleStatusSummary"
             :key="item.key"
@@ -608,132 +646,86 @@ const toast = ref("")
             <div class="text-caption text-medium-emphasis">{{ item.desc }}</div>
           </button>
         </div>
-
-        <div class="student-list-title"><div><div class="text-subtitle-1 font-weight-medium">学生ステータス一覧</div><small>{{ filteredStudents.length }}件中 {{ paginatedStudents.length }}件を表示</small></div><div class="student-filters"><label><HrIcon name="search" :size="15" /><input v-model="dashboardSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="selectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select><select v-model="scheduleFilter"><option value="all">すべての日程状況</option><option v-for="(meta, key) in SCHEDULE_STATUS_META" :key="key" :value="key">{{ meta.label }}</option></select></div></div>
-
-        <div v-if="students.length === 0" class="text-medium-emphasis pa-4">学生が登録されていません</div>
-        <div v-else-if="filteredStudents.length === 0" class="text-medium-emphasis pa-4">条件に一致する学生はいません</div>
-
-        <div v-else class="dash-grid">
-          <div class="dash-head">候補者名</div>
-          <div class="dash-head dash-head--sortable" @click="toggleSort('selection_status')">
-            選考ステップ <span class="sort-arrow">{{ sortIndicator("selection_status") }}</span>
-          </div>
-          <div class="dash-head dash-head--sortable" @click="toggleSort('schedule_status')">
-            ステータス <span class="sort-arrow">{{ sortIndicator("schedule_status") }}</span>
-          </div>
-          <div class="dash-head dash-head--sortable" @click="toggleSort('last_updated')">
-            最終更新 <span class="sort-arrow">{{ sortIndicator("last_updated") }}</span>
-          </div>
-          <div class="dash-head text-right">操作</div>
-
-          <template v-for="s in paginatedStudents" :key="s.id">
-            <div class="dash-cell">
-              <div class="dash-person">
-                <div class="avatar-circle" :style="{ background: avatarColor(s.name) }">{{ initials(s.name) }}</div>
-                <div class="dash-person__text">
-                  <div class="dash-person__line">
-                    <span class="dash-person__name" :title="s.name">{{ s.name }}</span>
-                    <span
-                      v-if="taskOf(s.id)"
-                      :class="`row-flag row-flag--${taskOf(s.id).tone}`"
-                      :title="taskOf(s.id).label"
-                    >{{ taskOf(s.id).icon }} {{ taskOf(s.id).action }}</span>
-                  </div>
-                  <div class="dash-person__mail text-caption text-medium-emphasis" :title="s.email">{{ s.email }}</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="dash-cell dash-cell--column">
-              <span>{{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}</span>
-              <span
-                class="text-caption text-medium-emphasis"
-                :title="needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件`"
-              >{{ needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件` }}</span>
-            </div>
-
-            <div class="dash-cell dash-cell--column">
-              <span class="status-chip" :style="{ color: scheduleMeta(s.id).color, background: scheduleMeta(s.id).bg }">
-                {{ scheduleMeta(s.id).icon }} {{ scheduleMeta(s.id).label }}
-              </span>
-              <span class="text-caption text-medium-emphasis mt-1" :title="scheduleMeta(s.id).desc">{{ scheduleMeta(s.id).desc }}</span>
-            </div>
-
-            <div class="dash-cell text-caption text-medium-emphasis">{{ lastUpdated(s.id) }}</div>
-
-            <div class="dash-cell justify-end ga-2">
-              <button
-                type="button"
-                class="icon-btn"
-                :title="`${s.name} さんとのチャットを開く`"
-                :aria-label="`${s.name} さんとのチャットを開く`"
-                @click="goToChat(s)"
-              ><HrIcon name="chat" :size="17" /></button>
-              <v-menu>
-                <template #activator="{ props }">
-                  <button type="button" class="icon-btn icon-btn--more" aria-label="その他の操作" v-bind="props">⋮</button>
-                </template>
-                <v-list density="compact">
-                  <v-list-item @click="openEditDialog(s)">選考状況を編集</v-list-item>
-                  <v-list-item @click="goToChat(s)">{{ s.name }} さんとのチャットを開く</v-list-item>
-                </v-list>
-              </v-menu>
-            </div>
-          </template>
-        </div>
-        <nav v-if="filteredStudents.length > pageSize" class="pagination" aria-label="学生一覧のページ送り"><button type="button" :disabled="currentPage === 1" @click="currentPage--">‹ 前へ</button><span>{{ currentPage }} / {{ totalPages }}</span><button type="button" :disabled="currentPage === totalPages" @click="currentPage++">次へ ›</button></nav>
-      </v-card>
-
-      <v-card class="pa-4 unsent-panel">
-        <div class="text-subtitle-2 font-weight-medium mb-1">
-          日程調整が必要な候補者
-          <span class="text-caption text-medium-emphasis">（{{ unsentStudents.length }}件）</span>
-        </div>
-        <p class="text-caption text-medium-emphasis mb-3">
-          まだ依頼していない人と、次の面接の依頼がまだの人を表示します。
-        </p>
-        <button
-          v-if="unsentStudents.length"
-          type="button"
-          class="bulk-send"
-          @click="router.push({ name: 'hr-schedule-create', query: { students: filteredUnsentStudents.map((s) => s.id).join(',') } })"
-        >表示中の {{ filteredUnsentStudents.length }}名にまとめて送る</button>
-        <div class="unsent-filters"><label><HrIcon name="search" :size="14" /><input v-model="unsentSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="unsentSelectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select></div>
-        <div v-if="unsentStudents.length === 0" class="text-caption text-medium-emphasis">
-          未送信の学生はいません
-        </div>
-        <div v-else-if="filteredUnsentStudents.length === 0" class="text-caption text-medium-emphasis">条件に一致する学生はいません</div>
-        <v-list v-else density="compact" class="pa-0">
-          <v-list-item v-for="s in paginatedUnsentStudents" :key="s.id" class="px-0 unsent-item">
-            <div class="d-flex align-center ga-2">
-              <div class="avatar-circle avatar-circle--sm" :style="{ background: avatarColor(s.name) }">
-                {{ initials(s.name) }}
-              </div>
-              <div class="flex-grow-1" style="min-width: 0">
-                <div class="font-weight-medium text-body-2 text-truncate">{{ s.name }}</div>
-                <div class="text-caption text-medium-emphasis">
-                  {{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}・次は{{ nextRoundLabel(s.id) }}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="unsent-send"
-                @click="router.push({ name: 'hr-schedule-create', query: { students: s.id } })"
-              >送る</button>
-              <button
-                type="button"
-                class="icon-btn icon-btn--sm"
-                :title="`${s.name} さんとのチャットを開く`"
-                :aria-label="`${s.name} さんとのチャットを開く`"
-                @click="goToChat(s)"
-              ><HrIcon name="chat" :size="15" /></button>
-            </div>
-          </v-list-item>
-        </v-list>
-        <nav v-if="filteredUnsentStudents.length > unsentPageSize" class="pagination pagination--unsent" aria-label="未送信学生のページ送り"><button type="button" :disabled="unsentPage === 1" @click="unsentPage--">‹</button><span>{{ unsentPage }} / {{ unsentTotalPages }}</span><button type="button" :disabled="unsentPage === unsentTotalPages" @click="unsentPage++">›</button></nav>
       </v-card>
     </div>
+
+    <!-- 学生ステータス一覧は列が多いので、右の欄と横に並べず画面の幅いっぱいに置く -->
+    <v-card class="pa-4 student-list-card">
+      <div class="student-list-title"><div><div class="text-subtitle-1 font-weight-medium">学生ステータス一覧</div><small>{{ filteredStudents.length }}件中 {{ paginatedStudents.length }}件を表示</small></div><div class="student-filters"><label><HrIcon name="search" :size="15" /><input v-model="dashboardSearch" type="search" placeholder="名前・メールで検索" /></label><select v-model="selectionFilter"><option value="all">すべての選考段階</option><option v-for="option in SELECTION_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.title }}</option></select><select v-model="scheduleFilter"><option value="all">すべての日程状況</option><option v-for="(meta, key) in SCHEDULE_STATUS_META" :key="key" :value="key">{{ meta.label }}</option></select></div></div>
+
+      <div v-if="students.length === 0" class="text-medium-emphasis pa-4">学生が登録されていません</div>
+      <div v-else-if="filteredStudents.length === 0" class="text-medium-emphasis pa-4">条件に一致する学生はいません</div>
+
+      <div v-else class="dash-grid">
+        <div class="dash-head">候補者名</div>
+        <div class="dash-head dash-head--sortable" @click="toggleSort('selection_status')">
+          選考ステップ <span class="sort-arrow">{{ sortIndicator("selection_status") }}</span>
+        </div>
+        <div class="dash-head dash-head--sortable" @click="toggleSort('schedule_status')">
+          ステータス <span class="sort-arrow">{{ sortIndicator("schedule_status") }}</span>
+        </div>
+        <div class="dash-head dash-head--sortable" @click="toggleSort('last_updated')">
+          最終更新 <span class="sort-arrow">{{ sortIndicator("last_updated") }}</span>
+        </div>
+        <div class="dash-head text-right">操作</div>
+
+        <template v-for="s in paginatedStudents" :key="s.id">
+          <div class="dash-cell">
+            <div class="dash-person">
+              <div class="avatar-circle" :style="{ background: avatarColor(s.name) }">{{ initials(s.name) }}</div>
+              <div class="dash-person__text">
+                <!-- 要対応バッジは一覧では出さない（taskOf は並び替えと「やること」欄で使い続ける） -->
+                <div class="dash-person__line">
+                  <span class="dash-person__name" :title="s.name">{{ s.name }}</span>
+                </div>
+                <div class="dash-person__mail text-caption text-medium-emphasis" :title="s.email">{{ s.email }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dash-cell dash-cell--column">
+            <span>{{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}</span>
+            <span
+              class="text-caption text-medium-emphasis"
+              :title="needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件`"
+            >{{ needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件` }}</span>
+          </div>
+
+          <div class="dash-cell dash-cell--column">
+            <span class="status-chip" :style="{ color: scheduleMeta(s.id).color, background: scheduleMeta(s.id).bg }">
+              {{ scheduleMeta(s.id).icon }} {{ scheduleMeta(s.id).label }}
+            </span>
+            <span
+              v-if="scheduleMeta(s.id).detail"
+              class="text-caption text-medium-emphasis mt-1"
+              :title="scheduleMeta(s.id).detail"
+            >{{ scheduleMeta(s.id).detail }}</span>
+          </div>
+
+          <div class="dash-cell text-caption text-medium-emphasis">{{ lastUpdated(s.id) }}</div>
+
+          <div class="dash-cell justify-end ga-2">
+            <button
+              type="button"
+              class="icon-btn"
+              :title="`${s.name} さんとのチャットを開く`"
+              :aria-label="`${s.name} さんとのチャットを開く`"
+              @click="goToChat(s)"
+            ><HrIcon name="chat" :size="17" /></button>
+            <v-menu>
+              <template #activator="{ props }">
+                <button type="button" class="icon-btn icon-btn--more" aria-label="その他の操作" v-bind="props">⋮</button>
+              </template>
+              <v-list density="compact">
+                <v-list-item @click="openEditDialog(s)">選考状況を編集</v-list-item>
+                <v-list-item @click="goToChat(s)">{{ s.name }} さんとのチャットを開く</v-list-item>
+              </v-list>
+            </v-menu>
+          </div>
+        </template>
+      </div>
+      <nav v-if="filteredStudents.length > pageSize" class="pagination" aria-label="学生一覧のページ送り"><button type="button" :disabled="currentPage === 1" @click="currentPage--">‹ 前へ</button><span>{{ currentPage }} / {{ totalPages }}</span><button type="button" :disabled="currentPage === totalPages" @click="currentPage++">次へ ›</button></nav>
+    </v-card>
 
     <v-dialog v-model="editDialogOpen" max-width="360">
       <v-card class="pa-4">
@@ -821,7 +813,8 @@ const toast = ref("")
 .page-header h1 { margin: 4px 0 6px; font-size: 22px; letter-spacing: -.02em; }
 .page-header p { margin: 0; color: #69758b; font-size: 12px; }
 .dashboard-body { display: flex; gap: 16px; align-items: flex-start; }
-.unsent-panel { width: 260px; flex: 0 0 auto; }
+/* 一覧は列が多いので、集計や右の欄と横並びにせず画面の幅をすべて使う */
+.student-list-card { margin-top: 16px; }
 
 .summary-grid {
   display: grid;
@@ -891,8 +884,6 @@ const toast = ref("")
   font-size: 11px;
   font-weight: 700;
 }
-.avatar-circle--sm { width: 26px; height: 26px; font-size: 11px; }
-.unsent-filters { display: grid; gap: 6px; margin-bottom: 12px; }.unsent-filters label { display: flex; height: 31px; align-items: center; gap: 6px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 8px; color: #8490a3; }.unsent-filters input { min-width: 0; flex: 1; border: 0; outline: 0; font: inherit; font-size: 9px; }.unsent-filters select { height: 31px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 7px; background: #fff; color: #536077; font-size: 9px; }.unsent-item { min-height: 42px!important; }.pagination--unsent { justify-content: center; padding-top: 9px; }.pagination--unsent button { width: 30px; padding: 0; }
 
 /* やること（要対応キュー） */
 .task-card { border: 1px solid #e2e8f2; }
@@ -951,6 +942,26 @@ const toast = ref("")
 .group__count--info { background: #eaf2ff; color: #1156c9; }
 .group__count--muted { background: #eef1f6; color: #55637c; }
 .group__toggle { color: #6b7789; font-size: 11px; font-weight: 700; text-align: right; }
+/* 内訳を開いたときの絞り込み（いまは「まだ送っていません」だけ） */
+/* 内訳を開いたときの絞り込み。件数つきのチップで、いま何を見ているかが一目で分かるようにする */
+.group__filter {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
+  border-top: 1px solid #eef1f6; padding: 10px 12px 0;
+}
+.group__filter-label { color: #7b879b; font-size: 11px; font-weight: 750; }
+.group__filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.group__filter-hint { color: #7b879b; font-size: 11px; font-weight: 650; }
+.stage-chip {
+  display: inline-flex; height: 28px; align-items: center; gap: 6px;
+  border: 1px solid #dce3ed; border-radius: 999px; padding: 0 11px;
+  background: #fff; color: #55637c; font: inherit; font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: border-color .15s, background .15s, color .15s;
+}
+.stage-chip:hover { border-color: #b7c9e9; background: #f7faff; }
+.stage-chip b { color: #8894a8; font-weight: 800; }
+.stage-chip--on { border-color: #1769ff; background: #1769ff; color: #fff; }
+.stage-chip--on b { color: rgb(255 255 255 / 78%); }
+.stage-chip--on:hover { border-color: #0f57d8; background: #0f57d8; }
 .group__jump {
   width: 100%; min-height: 34px; border: 0; border-radius: 8px; padding: 0 10px;
   background: #1769ff; color: #fff; font: inherit; font-size: 12px; font-weight: 700;
@@ -992,7 +1003,6 @@ const toast = ref("")
 }
 .icon-btn:hover { border-color: #1769ff; background: #f2f7ff; color: #1769ff; }
 .icon-btn:focus-visible { outline: 3px solid rgb(23 105 255 / 35%); outline-offset: 2px; }
-.icon-btn--sm { width: 30px; height: 30px; }
 .icon-btn--more { color: #8490a3; font-size: 17px; font-weight: 700; }
 .task-empty { margin: 12px 0 0; color: #6b7789; font-size: 13px; }
 .task-more {
@@ -1007,16 +1017,6 @@ const toast = ref("")
 .row-flag--info { background: #eaf2ff; color: #1156c9; }
 .row-flag--muted { background: #eef1f6; color: #55637c; }
 
-.bulk-send {
-  width: 100%; border: 1px solid #1769ff; border-radius: 8px; margin-bottom: 10px; padding: 8px;
-  background: #f2f7ff; color: #1769ff; font-size: 12px; font-weight: 700; cursor: pointer;
-}
-.bulk-send:hover { background: #e4eeff; }
-.unsent-send {
-  flex-shrink: 0; border: 1px solid #1769ff; border-radius: 7px; padding: 4px 10px;
-  background: #1769ff; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
-}
-.unsent-send:hover { background: #0f57d8; }
 
 .resend-field { display: block; margin-top: 12px; }
 .resend-field > span { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 700; }
@@ -1041,7 +1041,6 @@ const toast = ref("")
 
 @media (max-width: 1100px) {
   .dashboard-body { flex-direction: column; }
-  .unsent-panel { width: 100%; }
 }
 @media (max-width: 860px) {
   .group__head { grid-template-columns: minmax(0, 1fr); }
