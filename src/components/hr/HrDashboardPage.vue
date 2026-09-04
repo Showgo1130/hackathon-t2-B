@@ -603,10 +603,11 @@ const createUser = async (user) => {
                 <button type="button" class="task__primary" @click="runTask(task)">{{ task.action }}</button>
                 <button
                   type="button"
-                  class="task__secondary"
+                  class="icon-btn"
                   :title="`${task.student.name} さんとのチャットを開く`"
+                  :aria-label="`${task.student.name} さんとのチャットを開く`"
                   @click="goToChat(task.student)"
-                >💬</button>
+                ><HrIcon name="chat" :size="17" /></button>
               </div>
             </li>
           </ul>
@@ -710,17 +711,17 @@ const createUser = async (user) => {
 
             <div class="dash-cell text-caption text-medium-emphasis">{{ lastUpdated(s.id) }}</div>
 
-            <div class="dash-cell justify-end ga-1">
-              <v-btn
-                size="small"
-                variant="text"
+            <div class="dash-cell justify-end ga-2">
+              <button
+                type="button"
+                class="icon-btn"
                 :title="`${s.name} さんとのチャットを開く`"
                 :aria-label="`${s.name} さんとのチャットを開く`"
                 @click="goToChat(s)"
-              >💬</v-btn>
+              ><HrIcon name="chat" :size="17" /></button>
               <v-menu>
                 <template #activator="{ props }">
-                  <v-btn size="small" variant="text" v-bind="props">⋮</v-btn>
+                  <button type="button" class="icon-btn icon-btn--more" aria-label="その他の操作" v-bind="props">⋮</button>
                 </template>
                 <v-list density="compact">
                   <v-list-item @click="openEditDialog(s)">選考状況を編集</v-list-item>
@@ -769,13 +770,13 @@ const createUser = async (user) => {
                 class="unsent-send"
                 @click="router.push({ name: 'hr-schedule-create', query: { students: s.id } })"
               >送る</button>
-              <v-btn
-                size="x-small"
-                variant="text"
+              <button
+                type="button"
+                class="icon-btn icon-btn--sm"
                 :title="`${s.name} さんとのチャットを開く`"
                 :aria-label="`${s.name} さんとのチャットを開く`"
                 @click="goToChat(s)"
-              >💬</v-btn>
+              ><HrIcon name="chat" :size="15" /></button>
             </div>
           </v-list-item>
         </v-list>
@@ -971,9 +972,20 @@ const createUser = async (user) => {
 .group--warn { border-left-color: #e0930f; }
 .group--info { border-left-color: #1769ff; }
 .group--muted { border-left-color: #94a2b8; }
-.group__head { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; }
+/* まとまりが4つ並ぶので、件数・内訳・ボタンは行が変わっても同じ位置に来るよう固定列にする */
+.group__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 136px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px 4px 4px;
+}
 .group__row {
-  display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 74px 62px;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
   border: 0; border-radius: 8px; padding: 11px 10px; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
@@ -985,8 +997,7 @@ const createUser = async (user) => {
 /* 件数はひと目で拾えるよう、文章から出して数字だけを立てる */
 .group__count {
   display: inline-flex;
-  min-width: 58px;
-  flex-shrink: 0;
+  width: 100%;
   align-items: baseline;
   justify-content: flex-end;
   gap: 2px;
@@ -1002,10 +1013,11 @@ const createUser = async (user) => {
 .group__count--warn { background: #fdf4e7; color: #a86408; }
 .group__count--info { background: #eaf2ff; color: #1156c9; }
 .group__count--muted { background: #eef1f6; color: #55637c; }
-.group__toggle { flex-shrink: 0; min-width: 52px; color: #6b7789; font-size: 11px; font-weight: 700; text-align: right; }
+.group__toggle { color: #6b7789; font-size: 11px; font-weight: 700; text-align: right; }
 .group__jump {
-  flex-shrink: 0; min-height: 34px; border: 0; border-radius: 8px; padding: 0 14px;
-  background: #1769ff; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer;
+  width: 100%; min-height: 34px; border: 0; border-radius: 8px; padding: 0 10px;
+  background: #1769ff; color: #fff; font: inherit; font-size: 12px; font-weight: 700;
+  white-space: nowrap; cursor: pointer;
 }
 .group__jump:hover { background: #0f57d8; }
 
@@ -1033,11 +1045,18 @@ const createUser = async (user) => {
   background: #1769ff; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer;
 }
 .task__primary:hover { background: #0f57d8; }
-.task__secondary {
-  display: grid; width: 34px; height: 34px; place-items: center;
-  border: 1px solid #dce3ed; border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer;
+/* チャットを開く印。絵文字は小さく薄く出て押せると分からないので、
+   画面内の他のアイコンと同じ線画にして枠と色の変化を付ける */
+.icon-btn {
+  display: grid; width: 34px; height: 34px; flex-shrink: 0; place-items: center;
+  border: 1px solid #cfd8e6; border-radius: 8px; background: #fff;
+  color: #4c5a72; font: inherit; font-size: 16px; line-height: 1; cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
 }
-.task__secondary:hover { border-color: #1769ff; }
+.icon-btn:hover { border-color: #1769ff; background: #f2f7ff; color: #1769ff; }
+.icon-btn:focus-visible { outline: 3px solid rgb(23 105 255 / 35%); outline-offset: 2px; }
+.icon-btn--sm { width: 30px; height: 30px; }
+.icon-btn--more { color: #8490a3; font-size: 17px; font-weight: 700; }
 .task-empty { margin: 12px 0 0; color: #6b7789; font-size: 13px; }
 .task-more {
   width: calc(100% - 24px); border: 1px dashed #cfd8e6; border-radius: 8px; margin: 0 12px 12px; padding: 8px;
@@ -1087,6 +1106,12 @@ const createUser = async (user) => {
   .dashboard-body { flex-direction: column; }
   .unsent-panel { width: 100%; }
 }
+@media (max-width: 860px) {
+  .group__head { grid-template-columns: minmax(0, 1fr); }
+  .group__row { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .group__toggle { display: none; }
+}
+
 @media (max-width: 820px) {
   .dashboard-page { padding: 22px 18px 34px; }
   .student-list-title { align-items: stretch; flex-direction: column; }.student-filters { flex-wrap: wrap; }.student-filters label { width: 100%; }.student-filters select { flex: 1; }
