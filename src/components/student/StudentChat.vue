@@ -7,6 +7,7 @@ import HrIcon from "../hr/ui/HrIcon.vue"
 import ChatBubble from "../shared/ChatBubble.vue"
 import ChatCalendarCard from "./ChatCalendarCard.vue"
 import SelectionStatusChip from "./SelectionStatusChip.vue"
+import StudentChangePasswordDialog from "./StudentChangePasswordDialog.vue"
 
 const session = inject("session")
 const router = useRouter()
@@ -18,6 +19,8 @@ const selectionStatus = ref(null)
 const messagesEndRef = ref(null)
 const isSending = ref(false)
 const expandedLogs = reactive(new Set())
+const passwordDialogOpen = ref(false)
+const passwordChangedNotice = ref(false)
 
 const displayName = computed(() => session?.value?.name ?? session?.name ?? "")
 const avatarInitial = computed(() => displayName.value.slice(0, 1) || "?")
@@ -239,6 +242,10 @@ const logout = () => {
   router.push({ name: "login" })
 }
 
+const onPasswordChanged = () => {
+  passwordChangedNotice.value = true
+}
+
 const onKeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault()
@@ -268,6 +275,9 @@ const onKeydown = (e) => {
       </div>
 
       <div class="account-area">
+        <button type="button" class="account-action" @click="passwordDialogOpen = true">
+          <HrIcon name="key" :size="18" /><span>パスワード変更</span>
+        </button>
         <button type="button" class="logout" @click="logout">
           <HrIcon name="logout" :size="18" /><span>ログアウト</span>
         </button>
@@ -428,6 +438,11 @@ const onKeydown = (e) => {
         </div>
       </footer>
     </main>
+
+    <StudentChangePasswordDialog v-model="passwordDialogOpen" @changed="onPasswordChanged" />
+    <v-snackbar v-model="passwordChangedNotice" color="success" :timeout="3500">
+      パスワードを変更しました
+    </v-snackbar>
   </div>
 </template>
 
@@ -526,8 +541,8 @@ const onKeydown = (e) => {
 }
 .identity__status-label { color: #69758b; font-size: 10px; font-weight: 750; }
 
-.account-area { margin-top: auto; padding: 14px; }
-.logout {
+.account-area { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding: 14px; }
+.account-action, .logout {
   display: flex;
   width: 100%;
   min-height: 43px;
@@ -542,6 +557,7 @@ const onKeydown = (e) => {
   font-size: 12px;
   font-weight: 650;
 }
+.account-action:hover { border-color: #a9c6fa; background: #f4f8ff; color: #1769ff; }
 .logout:hover { border-color: #f0b9b9; background: #fff7f7; color: #c03737; }
 
 /* ---- 右：チャット本体（横幅いっぱいを使う） ---- */

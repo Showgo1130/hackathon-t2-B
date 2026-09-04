@@ -110,6 +110,43 @@ const handleListUsers = async (req, res) => {
   sendJson(res, 200, { users: [...addRole(students, "student"), ...addRole(interviewers, "interviewer"), ...addRole(hrStaff, "hr")] })
 }
 
+const handleChangeStudentPassword = async (req, res) => {
+  const authorization = req.headers.authorization ?? ""
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
+  const requester = token ? verifyToken(token) : null
+
+  if (!requester) return sendJson(res, 401, { error: "unauthorized" })
+  if (requester.role !== "student") return sendJson(res, 403, { error: "forbidden" })
+
+  let payload
+  try {
+    payload = await readJsonBody(req)
+  } catch {
+    return sendJson(res, 400, { error: "invalid_json" })
+  }
+
+  const currentPassword = typeof payload.currentPassword === "string" ? payload.currentPassword : ""
+  const newPassword = typeof payload.newPassword === "string" ? payload.newPassword : ""
+  if (!currentPassword || newPassword.length < 8) {
+    return sendJson(res, 400, { error: "invalid_fields" })
+  }
+  if (currentPassword === newPassword) {
+    return sendJson(res, 400, { error: "password_unchanged" })
+  }
+
+  const student = await studentsRepo.findById(requester.id)
+  if (!student) return sendJson(res, 404, { error: "student_not_found" })
+
+  const currentPasswordIsValid = await verifyPassword(currentPassword, student.password_hash)
+  if (!currentPasswordIsValid) {
+    return sendJson(res, 400, { error: "invalid_current_password" })
+  }
+
+  const passwordHash = await hashPassword(newPassword)
+  await studentsRepo.updateById(requester.id, { password_hash: passwordHash })
+  sendJson(res, 200, { success: true })
+}
+
 const attachApiRoutes = (server) => {
   server.middlewares.use((req, res, next) => {
     if (req.method === "POST" && req.url === "/api/login") {
@@ -129,6 +166,13 @@ const attachApiRoutes = (server) => {
     if (req.method === "GET" && req.url === "/api/users") {
       handleListUsers(req, res).catch((err) => {
         console.error("[api/users] error", err)
+        sendJson(res, 500, { error: "internal_error" })
+      })
+      return
+    }
+    if (req.method === "PATCH" && req.url === "/api/student/password") {
+      handleChangeStudentPassword(req, res).catch((err) => {
+        console.error("[api/student/password] error", err)
         sendJson(res, 500, { error: "internal_error" })
       })
       return
