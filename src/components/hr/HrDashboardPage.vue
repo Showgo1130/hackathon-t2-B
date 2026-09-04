@@ -2,8 +2,6 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import socketManager from "../../socketManager.js"
-import { session } from "../../session.js"
-import HrCreateUserDialog from "./HrCreateUserDialog.vue"
 import HrIcon from "./ui/HrIcon.vue"
 
 const router = useRouter()
@@ -483,55 +481,8 @@ onUnmounted(() => {
   socket.off("newMessage", onNewMessage)
 })
 
-// ---- ユーザー作成 ----
-const createDialogOpen = ref(false)
-const isCreating = ref(false)
-const createError = ref("")
+// 再送の結果など、この画面の操作の確認に使う
 const toast = ref("")
-
-const openCreateDialog = () => {
-  createError.value = ""
-  createDialogOpen.value = true
-}
-
-const createUser = async (user) => {
-  isCreating.value = true
-  createError.value = ""
-  try {
-    const response = await fetch("/api/users", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.value?.token ?? ""}`,
-      },
-      body: JSON.stringify({
-        role: user.role,
-        name: user.name,
-        email: user.email,
-        password: user.password,
-      }),
-    })
-
-    const result = await response.json()
-    if (!response.ok) {
-      createError.value = result.error === "email_already_exists"
-        ? "このメールアドレスは、選択したユーザー種別ですでに登録されています。"
-        : result.error === "forbidden"
-          ? "ユーザーを作成する権限がありません。"
-          : "ユーザーの作成に失敗しました。入力内容を確認してください。"
-      return
-    }
-
-    createDialogOpen.value = false
-    toast.value = `${result.name}さんの${user.roleLabel}アカウントを作成しました`
-    window.setTimeout(() => { toast.value = "" }, 2800)
-    socket.emit("loadDashboard") // 学生を作成した場合は一覧に反映する
-  } catch {
-    createError.value = "サーバーに接続できませんでした。しばらくしてから再度お試しください。"
-  } finally {
-    isCreating.value = false
-  }
-}
 </script>
 
 <template>
@@ -542,9 +493,6 @@ const createUser = async (user) => {
         <h1>ダッシュボード</h1>
         <p>候補者の選考ステップと日程調整の進み具合を一覧で確認できます。</p>
       </div>
-      <button class="add-button" type="button" @click="openCreateDialog">
-        <HrIcon name="user-plus" :size="18" />ユーザーを作成
-      </button>
     </header>
 
     <v-card class="pa-4 mb-4 task-card">
@@ -681,32 +629,35 @@ const createUser = async (user) => {
 
           <template v-for="s in paginatedStudents" :key="s.id">
             <div class="dash-cell">
-              <div class="d-flex align-center ga-3">
+              <div class="dash-person">
                 <div class="avatar-circle" :style="{ background: avatarColor(s.name) }">{{ initials(s.name) }}</div>
-                <div style="min-width: 0">
-                  <div class="font-weight-medium d-flex align-center ga-2">
-                    {{ s.name }}
-                    <span v-if="taskOf(s.id)" :class="`row-flag row-flag--${taskOf(s.id).tone}`">
-                      {{ taskOf(s.id).icon }} {{ taskOf(s.id).label }}
-                    </span>
+                <div class="dash-person__text">
+                  <div class="dash-person__line">
+                    <span class="dash-person__name" :title="s.name">{{ s.name }}</span>
+                    <span
+                      v-if="taskOf(s.id)"
+                      :class="`row-flag row-flag--${taskOf(s.id).tone}`"
+                      :title="taskOf(s.id).label"
+                    >{{ taskOf(s.id).icon }} {{ taskOf(s.id).action }}</span>
                   </div>
-                  <div class="text-caption text-medium-emphasis">{{ s.email }}</div>
+                  <div class="dash-person__mail text-caption text-medium-emphasis" :title="s.email">{{ s.email }}</div>
                 </div>
               </div>
             </div>
 
             <div class="dash-cell dash-cell--column">
               <span>{{ SELECTION_STATUS_LABEL[s.selection_status] ?? s.selection_status }}</span>
-              <span class="text-caption text-medium-emphasis">
-                {{ needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件` }}
-              </span>
+              <span
+                class="text-caption text-medium-emphasis"
+                :title="needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件`"
+              >{{ needsNewRequest(s) ? `次は${nextRoundLabel(s.id)}（未送信）` : `確定済み ${confirmedCount(s.id)}件` }}</span>
             </div>
 
             <div class="dash-cell dash-cell--column">
               <span class="status-chip" :style="{ color: scheduleMeta(s.id).color, background: scheduleMeta(s.id).bg }">
                 {{ scheduleMeta(s.id).icon }} {{ scheduleMeta(s.id).label }}
               </span>
-              <span class="text-caption text-medium-emphasis mt-1">{{ scheduleMeta(s.id).desc }}</span>
+              <span class="text-caption text-medium-emphasis mt-1" :title="scheduleMeta(s.id).desc">{{ scheduleMeta(s.id).desc }}</span>
             </div>
 
             <div class="dash-cell text-caption text-medium-emphasis">{{ lastUpdated(s.id) }}</div>
@@ -849,14 +800,6 @@ const createUser = async (user) => {
       </v-card>
     </v-dialog>
 
-    <HrCreateUserDialog
-      :open="createDialogOpen"
-      :submitting="isCreating"
-      :server-error="createError"
-      @close="createDialogOpen = false"
-      @create="createUser"
-    />
-
     <div v-if="toast" class="toast" role="status">{{ toast }}</div>
   </div>
 </template>
@@ -877,23 +820,6 @@ const createUser = async (user) => {
 .eyebrow { color: #7a8699; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
 .page-header h1 { margin: 4px 0 6px; font-size: 22px; letter-spacing: -.02em; }
 .page-header p { margin: 0; color: #69758b; font-size: 12px; }
-.add-button {
-  display: flex;
-  min-height: 40px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  border: none;
-  border-radius: 9px;
-  background: #1769ff;
-  padding: 0 16px;
-  color: #fff;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 650;
-}
-.add-button:hover { background: #0f57dd; }
-
 .dashboard-body { display: flex; gap: 16px; align-items: flex-start; }
 .unsent-panel { width: 260px; flex: 0 0 auto; }
 
@@ -927,8 +853,10 @@ const createUser = async (user) => {
 
 .dash-grid {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) 110px minmax(180px, 1.6fr) 110px 100px;
+  grid-template-columns: minmax(230px, 2.2fr) 140px minmax(190px, 1.6fr) 104px 96px;
   align-items: center;
+  /* 列幅を保ったまま、狭い画面では表だけを横スクロールさせる */
+  overflow-x: auto;
 }
 .dash-head {
   border-bottom: 1px solid #e4e9f1;
@@ -940,9 +868,18 @@ const createUser = async (user) => {
 .dash-head--sortable { cursor: pointer; user-select: none; }
 .dash-head--sortable:hover { color: #1769ff; }
 .sort-arrow { font-size: 10px; }
-.dash-cell { display: flex; min-width: 0; min-height: 48px; align-items: center; border-bottom: 1px solid #f0f3f8; padding: 7px 8px; font-size: 12px; }
-.dash-cell--column { flex-direction: column; align-items: flex-start; }
-.status-chip { border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 650; }
+.dash-cell { display: flex; min-width: 0; min-height: 48px; align-items: center; border-bottom: 1px solid #f0f3f8; padding: 7px 8px; font-size: 12px; white-space: nowrap; }
+.dash-cell--column { flex-direction: column; align-items: flex-start; justify-content: center; }
+/* 列幅に収まらない文は折り返さず省略する。全文は title で読める */
+.dash-cell--column > * { overflow: hidden; max-width: 100%; text-overflow: ellipsis; }
+.status-chip { flex: 0 0 auto; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 650; }
+
+/* 候補者名：名前・メール・要対応バッジが改行で崩れないよう、1行ずつ省略表示にする */
+.dash-person { display: flex; min-width: 0; width: 100%; align-items: center; gap: 11px; }
+.dash-person__text { min-width: 0; flex: 1; }
+.dash-person__line { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.dash-person__name { overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
+.dash-person__mail { overflow: hidden; text-overflow: ellipsis; }
 .avatar-circle {
   display: grid;
   width: 29px;
@@ -1064,7 +1001,7 @@ const createUser = async (user) => {
 }
 .task-more:hover { border-color: #1769ff; color: #1769ff; }
 
-.row-flag { border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 700; }
+.row-flag { flex: 0 0 auto; border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 700; }
 .row-flag--danger { background: #fdeceb; color: #c9352a; }
 .row-flag--warn { background: #fdf4e7; color: #a86408; }
 .row-flag--info { background: #eaf2ff; color: #1156c9; }
@@ -1115,6 +1052,6 @@ const createUser = async (user) => {
 @media (max-width: 820px) {
   .dashboard-page { padding: 22px 18px 34px; }
   .student-list-title { align-items: stretch; flex-direction: column; }.student-filters { flex-wrap: wrap; }.student-filters label { width: 100%; }.student-filters select { flex: 1; }
-  .dash-grid { grid-template-columns: minmax(140px, 2fr) 90px minmax(140px, 1.4fr) 90px 90px; overflow-x: auto; }
+  .dash-grid { grid-template-columns: minmax(180px, 2fr) 104px minmax(150px, 1.4fr) 92px 88px; overflow-x: auto; }
 }
 </style>
