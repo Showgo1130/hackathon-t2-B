@@ -253,22 +253,21 @@ const TASK_GROUPS = [
 const countOf = (items, key) => items.filter((item) => item.key === key).length
 
 const describeGroup = (key, items) => {
-  const n = items.length
   if (key === "reply") {
     return {
       tone: "info",
-      title: `${n}人の候補者に、まだ返信していません`,
+      title: "候補者にまだ返信していません",
       note: `いちばん古いメッセージは ${elapsedLabel(now.value - items[0].sortAt)} 前に届いています`,
     }
   }
   if (key === "nudge") {
     const overdue = countOf(items, "overdue")
+    const dueToday = countOf(items, "dueToday")
     return {
       tone: overdue > 0 ? "danger" : "warn",
-      title: `${n}人の候補者から、まだ回答が届いていません`,
-      note: overdue > 0
-        ? `${overdue}人は提出期限を過ぎています${countOf(items, "dueToday") ? `／${countOf(items, "dueToday")}人は本日が期限です` : ""}`
-        : "本日が提出期限です",
+      title: "候補者から回答が届いていません",
+      note: [overdue ? `提出期限切れ ${overdue}人` : "", dueToday ? `本日が期限 ${dueToday}人` : ""]
+        .filter(Boolean).join("／"),
     }
   }
   if (key === "stuck") {
@@ -276,16 +275,16 @@ const describeGroup = (key, items) => {
     const stalled = countOf(items, "stalled")
     return {
       tone: "warn",
-      title: `${n}件の日程調整が前に進んでいません`,
-      note: [resubmit ? `候補が合わず再提出待ち ${resubmit}件` : "", stalled ? `面接官の回答待ち ${stalled}件` : ""]
+      title: "日程調整が前に進んでいません",
+      note: [resubmit ? `候補が合わず再提出待ち ${resubmit}人` : "", stalled ? `面接官の回答待ち ${stalled}人` : ""]
         .filter(Boolean).join("／"),
     }
   }
   const secondRound = items.filter((item) => confirmedCount(item.student.id) > 0).length
   return {
     tone: "muted",
-    title: `${n}人に、まだ日程調整を送っていません`,
-    note: secondRound > 0 ? `うち${secondRound}人は次の面接ぶんです` : "全員が初回の日程調整です",
+    title: "日程調整をまだ送っていません",
+    note: secondRound > 0 ? `初回 ${items.length - secondRound}人／次の面接ぶん ${secondRound}人` : "全員が初回の日程調整です",
   }
 }
 
@@ -556,9 +555,10 @@ const createUser = async (user) => {
             人事が手を動かさないと止まるものだけを、上から順に並べています。
           </small>
         </div>
-        <strong class="task-total" :class="{ 'task-total--zero': tasks.length === 0 }">
-          {{ tasks.length }}<span>件</span>
-        </strong>
+        <div class="task-total" :class="{ 'task-total--zero': tasks.length === 0 }">
+          <strong>{{ tasks.length }}</strong><span>人</span>
+          <small>対応が必要な候補者</small>
+        </div>
       </div>
 
       <p v-if="!taskGroups.length" class="task-empty">✅ いま手を動かす必要のある候補者はいません。</p>
@@ -576,6 +576,9 @@ const createUser = async (user) => {
               <span class="group__text">
                 <strong>{{ group.title }}</strong>
                 <small>{{ group.note }}</small>
+              </span>
+              <span :class="`group__count group__count--${group.tone}`">
+                <b>{{ group.count }}</b>人
               </span>
               <span class="group__toggle">{{ openGroup === group.key ? "閉じる ▲" : "内訳 ▼" }}</span>
             </button>
@@ -956,9 +959,11 @@ const createUser = async (user) => {
 /* 今日やること（要対応キュー） */
 .task-card { border: 1px solid #e2e8f2; }
 .task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.task-total { color: #1769ff; font-size: 30px; line-height: 1; }
+.task-total { flex-shrink: 0; text-align: right; line-height: 1; }
+.task-total strong { color: #1769ff; font-size: 32px; font-variant-numeric: tabular-nums; }
 .task-total span { margin-left: 3px; color: #7b879b; font-size: 12px; }
-.task-total--zero { color: #1a8a4c; }
+.task-total small { display: block; margin-top: 5px; color: #7b879b; font-size: 10px; }
+.task-total--zero strong { color: #1a8a4c; }
 /* 4つの作業のまとまり。中身は開いたときだけ出す */
 .group-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
 .group { border: 1px solid #e5eaf2; border-left: 4px solid #cbd5e3; border-radius: 10px; background: #fff; }
@@ -977,7 +982,27 @@ const createUser = async (user) => {
 .group__text { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .group__text strong { font-size: 14px; }
 .group__text small { margin-top: 2px; color: #6b7789; font-size: 12px; }
-.group__toggle { flex-shrink: 0; color: #6b7789; font-size: 11px; font-weight: 700; }
+/* 件数はひと目で拾えるよう、文章から出して数字だけを立てる */
+.group__count {
+  display: inline-flex;
+  min-width: 58px;
+  flex-shrink: 0;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: #eef1f6;
+  color: #55637c;
+  font-size: 11px;
+  font-weight: 700;
+}
+.group__count b { font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1; }
+.group__count--danger { background: #fdeceb; color: #c9352a; }
+.group__count--warn { background: #fdf4e7; color: #a86408; }
+.group__count--info { background: #eaf2ff; color: #1156c9; }
+.group__count--muted { background: #eef1f6; color: #55637c; }
+.group__toggle { flex-shrink: 0; min-width: 52px; color: #6b7789; font-size: 11px; font-weight: 700; text-align: right; }
 .group__jump {
   flex-shrink: 0; min-height: 34px; border: 0; border-radius: 8px; padding: 0 14px;
   background: #1769ff; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer;
