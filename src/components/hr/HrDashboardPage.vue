@@ -155,7 +155,7 @@ const lastUpdatedAt = (studentId) => {
 }
 const lastUpdated = (studentId) => relativeTime(lastUpdatedAt(studentId))
 
-// ---- 今日やること（要対応キュー）----
+// ---- やること（要対応キュー）----
 // 集計だけでは「次に何をするか」が分からないので、候補者ごとに1件だけ
 // 実行できる作業を決めて、緊急度の高い順に並べる
 const now = ref(Date.now())
@@ -550,7 +550,7 @@ const createUser = async (user) => {
     <v-card class="pa-4 mb-4 task-card">
       <div class="task-head">
         <div>
-          <div class="text-subtitle-1 font-weight-medium">今日やること</div>
+          <div class="text-subtitle-1 font-weight-medium">やること</div>
           <small class="text-caption text-medium-emphasis">
             人事が手を動かさないと止まるものだけを、上から順に並べています。
           </small>
@@ -956,7 +956,7 @@ const createUser = async (user) => {
 .avatar-circle--sm { width: 26px; height: 26px; font-size: 11px; }
 .unsent-filters { display: grid; gap: 6px; margin-bottom: 12px; }.unsent-filters label { display: flex; height: 31px; align-items: center; gap: 6px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 8px; color: #8490a3; }.unsent-filters input { min-width: 0; flex: 1; border: 0; outline: 0; font: inherit; font-size: 9px; }.unsent-filters select { height: 31px; border: 1px solid #dce3ed; border-radius: 7px; padding: 0 7px; background: #fff; color: #536077; font-size: 9px; }.unsent-item { min-height: 42px!important; }.pagination--unsent { justify-content: center; padding-top: 9px; }.pagination--unsent button { width: 30px; padding: 0; }
 
-/* 今日やること（要対応キュー） */
+/* やること（要対応キュー） */
 .task-card { border: 1px solid #e2e8f2; }
 .task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .task-total { flex-shrink: 0; text-align: right; line-height: 1; }
