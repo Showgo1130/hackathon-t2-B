@@ -502,7 +502,6 @@ const toast = ref("")
       <div>
         <span class="eyebrow">DASHBOARD</span>
         <h1>ダッシュボード</h1>
-        <p>候補者の選考ステップと日程調整の進み具合を一覧で確認できます。</p>
       </div>
     </header>
 

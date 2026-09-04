@@ -8,7 +8,6 @@ import InterviewerSchedule from "./InterviewerSchedule.vue"
     <header class="page-header">
       <span class="eyebrow">DASHBOARD</span>
       <h1>ダッシュボード</h1>
-      <p>担当する面接の予定と、日程調整の通知をまとめて確認できます。</p>
     </header>
 
     <div class="dashboard-body">

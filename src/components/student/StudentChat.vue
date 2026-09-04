@@ -289,7 +289,6 @@ const onKeydown = (e) => {
         <span class="chat-header__icon"><HrIcon name="chat" :size="18" /></span>
         <div>
           <h2>面接チャット</h2>
-          <p>人事担当者とのやり取りと日程調整をここで行います</p>
         </div>
       </header>
 
