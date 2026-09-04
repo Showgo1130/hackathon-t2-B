@@ -42,17 +42,31 @@ const pendingCalendarRequest = computed(() => {
 
 const isActiveCalendarRequest = (msg) => pendingCalendarRequest.value?.id === msg.id
 
+// 面接官の予定と照合される前なら、送信済みでも候補を選び直せる。
+// 照合が始まったかどうかはサーバーしか知らないので、init と calendarRevisable で受け取る
+const revisableRequestId = ref(null)
+const errorNotice = ref("")
+const lastCalendarRequest = computed(() => {
+  const index = findLastIndexOf(messages, (m) => m.msg_type === "calendar_request")
+  return index === -1 ? null : messages[index]
+})
+const requestIdOf = (msg) => msg.payload?.requestId ?? msg.request_id
+const isRevisableCalendarRequest = (msg) =>
+  revisableRequestId.value != null &&
+  lastCalendarRequest.value?.id === msg.id &&
+  requestIdOf(msg) === revisableRequestId.value
+const isEditableCalendarRequest = (msg) => isActiveCalendarRequest(msg) || isRevisableCalendarRequest(msg)
+
 // 候補送信のログはバブルとしては描画せず、対応する依頼カレンダーの下にまとめる
 const visibleMessages = computed(() => messages.filter((m) => m.msg_type !== "calendar_submission"))
 
+// 修正すると提出が複数並ぶため、その依頼に対する「最後の」提出を見る
 const submissionFor = (msg) => {
   const idx = messages.findIndex((m) => m.id === msg.id)
   if (idx === -1) return null
-  return (
-    messages
-      .slice(idx + 1)
-      .find((m) => m.msg_type === "calendar_submission" && m.request_id === msg.request_id) ?? null
-  )
+  const after = messages.slice(idx + 1)
+  const lastIdx = findLastIndexOf(after, (m) => m.msg_type === "calendar_submission" && m.request_id === msg.request_id)
+  return lastIdx === -1 ? null : after[lastIdx]
 }
 const submittedSlotsFor = (msg) => submissionFor(msg)?.payload?.slots ?? []
 
@@ -153,23 +167,35 @@ const scrollToBottom = () => {
   })
 }
 
-const onInit = ({ messages: history, selectionStatus: status }) => {
+const onInit = ({ messages: history, selectionStatus: status, revisableRequestId: revisableId }) => {
   messages.splice(0, messages.length, ...history)
   selectionStatus.value = status
+  revisableRequestId.value = revisableId ?? null
   scrollToBottom()
 }
 const onNewMessage = (message) => {
   messages.push(message)
   scrollToBottom()
 }
+const onCalendarRevisable = ({ requestId, revisable }) => {
+  if (revisable) revisableRequestId.value = requestId
+  else if (revisableRequestId.value === requestId) revisableRequestId.value = null
+}
+const onAppError = ({ message }) => {
+  errorNotice.value = message ?? "処理に失敗しました"
+}
 
 onMounted(() => {
   socket.on("init", onInit)
   socket.on("newMessage", onNewMessage)
+  socket.on("calendarRevisable", onCalendarRevisable)
+  socket.on("appError", onAppError)
 })
 onUnmounted(() => {
   socket.off("init", onInit)
   socket.off("newMessage", onNewMessage)
+  socket.off("calendarRevisable", onCalendarRevisable)
+  socket.off("appError", onAppError)
 })
 
 const sendMessage = async () => {
@@ -184,6 +210,7 @@ const sendMessage = async () => {
 // 候補日時の選択は ChatCalendarCard 側が持ち、確定分が submit で渡ってくる
 const submitCalendar = (requestId, slots) => {
   if (!Array.isArray(slots) || slots.length === 0) return
+  errorNotice.value = ""
   socket.emit("submitCalendar", { requestId, slots })
 }
 
@@ -207,7 +234,7 @@ const onKeydown = (e) => {
     <aside class="sidebar">
       <div class="brand">
         <span class="brand__mark"><HrIcon name="calendar" :size="25" :stroke-width="2" /></span>
-        <div><strong>Hiresch</strong><small>面接チャット</small></div>
+        <div><strong>ミツカル採用</strong><small>面接チャット</small></div>
       </div>
 
       <div class="identity">
@@ -249,7 +276,7 @@ const onKeydown = (e) => {
               <span>{{ formatDateLabel(msg.created_at) }}</span>
             </div>
 
-            <!-- 日程調整カレンダー：送信後も表示したまま（読み取り専用）にする -->
+            <!-- 日程調整カレンダー：照合が始まるまでは選び直せる。始まったら読み取り専用にする -->
             <ChatBubble
               v-if="msg.msg_type === 'calendar_request'"
               :align="bubbleAlign(msg)"
@@ -260,10 +287,17 @@ const onKeydown = (e) => {
               <ChatCalendarCard
                 :range-start="msg.payload.rangeStart"
                 :range-end="msg.payload.rangeEnd"
-                :readonly="!isActiveCalendarRequest(msg)"
+                :readonly="!isEditableCalendarRequest(msg)"
                 :submitted-slots="submittedSlotsFor(msg)"
+                :heading="isRevisableCalendarRequest(msg) ? '面接可能な時間帯を選び直す' : '面接可能な時間帯を選択'"
+                :submit-label="isRevisableCalendarRequest(msg) ? 'この内容に修正する' : '確定して送信'"
                 @submit="(slots) => submitCalendar(msg.payload.requestId, slots)"
               />
+
+              <p v-if="isRevisableCalendarRequest(msg)" class="revisable-note">
+                まだ面接官の予定と照合されていないため、日時を選び直して送り直せます。
+              </p>
+              <p v-if="isRevisableCalendarRequest(msg) && errorNotice" class="revisable-error">{{ errorNotice }}</p>
 
               <div v-if="submissionFor(msg)" class="submit-log">
                 <button type="button" class="submit-log__toggle" @click="toggleLog(msg.id)">
@@ -524,6 +558,23 @@ const onKeydown = (e) => {
   color: #42506a;
   font-size: 13px;
   line-height: 1.7;
+}
+/* 照合が始まるまでの猶予を伝える案内 */
+.revisable-note {
+  margin: 10px 0 0;
+  border: 1px solid #d6e3fb;
+  border-radius: 8px;
+  padding: 8px 11px;
+  background: #f4f8ff;
+  color: #1c3a6e;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.revisable-error {
+  margin: 8px 0 0;
+  color: #c9352a;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .submit-log {

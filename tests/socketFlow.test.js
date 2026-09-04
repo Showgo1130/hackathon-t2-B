@@ -207,6 +207,78 @@ describe("学生の候補提出から面接官への確認まで", () => {
   })
 })
 
+describe("学生：面接官と照合される前の候補日時の修正", () => {
+  const SLOT_A = { slotDate: "2026-09-10", slotHour: 14 }
+  const SLOT_B = { slotDate: "2026-09-11", slotHour: 10 }
+
+  // 候補を1件出して、面接官がまだ何も答えていない状態まで進める
+  const submitOnce = async ({ interviewerCount = 1 } = {}) => {
+    const context = await setupRequest({ interviewerCount, requiredInterviewerCount: 1 })
+    const { socket: interviewerSocket } = await connectAs(interviewerUser(context.interviewers[0]))
+    const { socket: studentSocket } = await connectAs(studentUser(context.student))
+    const incoming = []
+    interviewerSocket.on("newMessage", (message) => incoming.push(message))
+
+    studentSocket.emit("submitCalendar", { requestId: context.request.id, slots: [SLOT_A] })
+    const state = await nextEvent(studentSocket, "calendarRevisable")
+    await wait()
+    return { ...context, interviewerSocket, studentSocket, incoming, state }
+  }
+
+  it("面接官が答える前なら修正できる状態として学生に伝わる", async () => {
+    const { state, request } = await submitOnce()
+
+    assert.equal(state.requestId, request.id)
+    assert.equal(state.revisable, true)
+  })
+
+  it("候補を選び直すと、候補日時が差し替わり外した日時の空き確認は取り下げられる", async () => {
+    const { studentSocket, request, incoming } = await submitOnce()
+    incoming.length = 0
+
+    studentSocket.emit("submitCalendar", { requestId: request.id, slots: [SLOT_B] })
+    await wait()
+
+    assert.deepEqual(
+      db.candidate_slots.map((slot) => `${slot.slot_date} ${slot.slot_hour}`),
+      ["2026-09-11 10"],
+      "候補は選び直した内容だけになる"
+    )
+    assert.ok(
+      incoming.some((m) => m.payload?.kind === "availability_check_withdrawn" && m.payload.slotDate === "2026-09-10"),
+      "外した日時の空き確認は不要になったと面接官へ伝える"
+    )
+    assert.ok(
+      incoming.some((m) => m.msg_type === "availability_check" && m.payload.slotDate === "2026-09-11"),
+      "選び直した日時の空き確認が新たに飛ぶ"
+    )
+    const submissions = db.messages.filter((m) => m.msg_type === "calendar_submission")
+    assert.equal(submissions.length, 2)
+    assert.match(submissions[1].body, /修正しました/)
+  })
+
+  it("面接官が空きを答えたあとは修正できない", async () => {
+    const { studentSocket, interviewerSocket, request } = await submitOnce()
+
+    interviewerSocket.emit("answerAvailability", { ...SLOT_A, isAvailable: true, requestId: request.id })
+    const locked = await nextEvent(studentSocket, "calendarRevisable")
+    assert.equal(locked.revisable, false)
+
+    studentSocket.emit("submitCalendar", { requestId: request.id, slots: [SLOT_B] })
+    const error = await nextEvent(studentSocket, "appError")
+
+    assert.match(error.message, /変更できません/)
+    assert.deepEqual(db.candidate_slots.map((slot) => slot.slot_date), ["2026-09-10"], "候補は書き換わらない")
+  })
+
+  it("再接続したときの init も、修正できるかどうかを伝える", async () => {
+    const { student, request } = await submitOnce()
+
+    const reconnected = await connectAs(studentUser(student))
+    assert.equal(reconnected.init.revisableRequestId, request.id)
+  })
+})
+
 describe("面接官の空き回答", () => {
   const prepareCheck = async () => {
     const context = await setupRequest({ interviewerCount: 1, requiredInterviewerCount: 1 })
