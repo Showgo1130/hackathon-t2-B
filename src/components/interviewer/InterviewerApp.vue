@@ -44,7 +44,7 @@ const logout = () => {
     <aside class="sidebar" :class="{ 'sidebar--open': mobileMenuOpen }">
       <div class="brand">
         <span class="brand__mark"><HrIcon name="calendar" :size="25" :stroke-width="2" /></span>
-        <div><strong>Hiresch</strong><small>面接官</small></div>
+        <div><strong>ミツカル採用</strong><small>面接官</small></div>
       </div>
 
       <nav class="main-nav" aria-label="面接官メニュー">
