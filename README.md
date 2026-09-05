@@ -14,7 +14,7 @@
 
 ![デモ](docs/preview.gif)
 
-通しの録画は [docs/demo.mp4](docs/demo.mp4)（2分25秒 / 音声なし / 2.6MB）にあります。
+通しの録画（2分25秒 / 音声なし）は **[デモページ](https://showgo1130.github.io/hackathon-t2-B/)** で再生できます。
 
 | 人事のダッシュボード | 学生の候補提出 |
 |---|---|
