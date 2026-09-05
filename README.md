@@ -126,28 +126,19 @@ DB アクセスは `server/repositories/` にリポジトリ層として分離�
 
 人間が持ったのは、**何を作るか / それが誰にどう効くか / どの順で決めるか** の判断です。手を動かす時間を実装から引き上げたぶんを、上の「価値の設計」と「進め方」に振りました。
 
-## 自分の担当範囲
+## 担当したところ
 
-チーム全体90コミットのうち **43コミット / +8,112 −1,742行** を担当しました（チーム最多）。実装は AI が書いているので、以下は**どの領域を自分が持って進めたか**の内訳です（数字は git 履歴の実測）。
+チームで作ったアプリです。終盤は全員で画面を共有しながら進めたので、コミット履歴上の分担は必ずしも個人の貢献量と一致しません。そのうえで、自分が主に手を入れたのは次の領域です。
 
-**一人で担当した領域**
-
-- **テスト一式**（`tests/matching.test.js` / `tests/socketFlow.test.js` / `tests/e2e/scenario.test.js`、約1,800行 — 全て自分）
+- **テスト一式**（`tests/matching.test.js` / `tests/socketFlow.test.js` / `tests/e2e/scenario.test.js`）
   照合エンジンの業務シナリオ、Socket.IO の実サーバー・実クライアント通し、実DBに対するE2E
-- **人事ダッシュボード**（`HrDashboardPage.vue` — 自分1,809行 / 他77行）
-  全学生の進行状況と「今日やること」キュー
-- **面接官の空き予定カレンダー**（`InterviewerCalendar.vue` — 自分542行 / 他93行）
+- **人事ダッシュボード**（`HrDashboardPage.vue`）— 全学生の進行状況と「今日やること」キュー
+- **面接官の空き予定カレンダー**（`InterviewerCalendar.vue` / `InterviewerSchedule.vue`）
   下書きしてから保存する方式、確定済み面接の重畳表示、過去日時の編集防止
-- **面接官側の Socket ハンドラと通知ストア**（`socket_event/interviewer.js` — 自分158行 / 他92行）
+- **面接官側の Socket ハンドラと通知まわり**（`socket_event/interviewer.js`）
+- **照合エンジン**（`server/matching.js`）のうち、可否の誤判定の修正と、確定直前のダブルブッキング再確認
 
-**チームで分担した領域**
-
-- **照合エンジン**（`server/matching.js` — 自分379行 / 他2名232行）
-  可否の誤判定の修正と、確定直前のダブルブッキング再確認を担当
-- **学生チャット**（`StudentChat.vue` / `ChatCalendarCard.vue` / `CalendarPicker.vue`）
-  カレンダーからの候補提出まわり
-
-認証（`server/auth.js`）と DB スキーマ（`sql/schema.sql`）は他のメンバーの担当です。
+認証（`server/auth.js`）と DB スキーマ（`sql/schema.sql`）は他のメンバーが担当しています。
 
 ## テスト
 
